@@ -20,11 +20,11 @@ This project seamlessly bridges unmanaged native code with managed C# UI element
 
 ## 🛠️ Dependencies
 
-This library targets **.NET 10.0** and relies on the following core frameworks:
-* [Avalonia UI](https://avaloniaui.net/) (v12.x) for the cross-platform rendering engine.
-* [Silk.NET.OpenGL](https://github.com/dotnet/Silk.NET) (v2.x) for hardware-accelerated OpenGL context bindings.
+This library targets **.NET 8.0** (for optimal Long-Term Support compatibility) and relies on the following core frameworks:
+* **Avalonia UI** (v12.x) for the cross-platform rendering engine.
+* **Silk.NET.OpenGL** (v2.x) for hardware-accelerated OpenGL context bindings.
 
-*Note: The native `libprojectM` binaries and its required `ProjectM/` preset assets are bundled and automatically copied to the build output directory via `JukeboxVisualizations.csproj`.*
+*Note: The native `libprojectM` binaries, the **GLEW** extension wrangler (`glew32.dll`), and the required `ProjectM/` preset assets are completely bundled. They are automatically copied to your application's build output directory via `JukeboxVisualizations.csproj` so they are available at runtime with zero extra installation steps required by the user.*
 
 ---
 
@@ -74,3 +74,12 @@ MyVisualizer.LoadRandomPreset();
 // Or load a specific preset file
 MyVisualizer.LoadPreset(@"ProjectM\presets\Some Awesome Preset.milk");
 ```
+
+---
+
+## 🔗 External Links & Requirements
+
+* **[Avalonia UI](https://avaloniaui.net/)**: The cross-platform UI framework powering the visualizer control.
+* **[Silk.NET](https://github.com/dotnet/Silk.NET)**: Provides the high-speed C# OpenGL bindings.
+* **[ProjectM](https://github.com/projectM-visualizer/projectm)**: The native open-source music visualizer engine.
+* **[GLEW](https://glew.sourceforge.net/)**: The OpenGL Extension Wrangler Library (bundled internally for native context initialization).
