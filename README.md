@@ -1,29 +1,76 @@
 # Jukebox-Visualizations
 
-An Avalonia UI control library providing OpenGL-accelerated audio visualizations via libprojectM. 
+**Jukebox-Visualizations** is a fully self-contained Avalonia UI control library that provides high-performance, OpenGL-accelerated audio visualizations via the renowned [libprojectM](https://github.com/projectM-visualizer/projectm) engine. 
 
-This repository was extracted to keep complex graphical rendering and unmanaged code isolated from standard application logic. It serves as a modular plugin that can be referenced by the `Jukebox` or any other Avalonia application requiring high-performance audio visualizations.
+It provides an out-of-the-box, plug-and-play solution for integrating stunning, music-reactive visuals into any Avalonia application. Included in this repository is the complete suite of native C++ dependencies and a massive library of over 9,400+ hand-crafted `.milk` presets and textures, ensuring you have an endless variety of dynamic visuals instantly available.
 
-## Architecture
+---
 
-The project consists of two primary layers:
+## ⚙️ How It Works
 
-1. **Native Interop (`ProjectMNative.cs`):** Contains the P/Invoke signatures required to interface directly with the `libprojectM` C API. It handles creating instances, managing rendering contexts, and passing audio pulse data to the visualizer engine.
-2. **Avalonia Control (`ProjectMControl.cs`):** An Avalonia `OpenGlControlBase` implementation that provides a managed wrapper around the native visualizer. It handles the OpenGL lifecycle, context acquisition via Silk.NET, and rendering the visualizer frame directly onto the Avalonia composition surface.
+This project seamlessly bridges unmanaged native code with managed C# UI elements, operating across two primary layers:
 
-## Dependencies
+1. **Native Interop (`ProjectMNative.cs`)**  
+   A comprehensive P/Invoke wrapper that securely interfaces with the C-based `libprojectM.dll` API. It is responsible for managing the unmanaged lifecycle (creating/destroying instances), handling rendering contexts, loading `.milk` presets, and feeding raw PCM audio data directly into the visualization engine's beat detection algorithms.
 
-* .NET 10.0
-* Avalonia UI (v12.x)
-* Silk.NET.OpenGL (v2.x)
-* Requires native `libprojectM` binaries to be available in the execution directory at runtime.
+2. **Avalonia Control (`ProjectMControl.cs`)**  
+   A custom Avalonia `OpenGlControlBase` component that drops directly into your UI. It takes complete ownership of acquiring an OpenGL hardware-accelerated surface via `Silk.NET.OpenGL` and delegates the actual drawing instructions directly to the unmanaged ProjectM engine, compositing the result beautifully into the Avalonia rendering pipeline.
 
-## Usage
+---
 
-Reference the compiled `JukeboxVisualizations.dll` in your Avalonia project, ensure your `AppBuilder` is configured to support the necessary rendering modes, and include the control in your XAML:
+## 🛠️ Dependencies
+
+This library targets **.NET 10.0** and relies on the following core frameworks:
+* [Avalonia UI](https://avaloniaui.net/) (v12.x) for the cross-platform rendering engine.
+* [Silk.NET.OpenGL](https://github.com/dotnet/Silk.NET) (v2.x) for hardware-accelerated OpenGL context bindings.
+
+*Note: The native `libprojectM` binaries and its required `ProjectM/` preset assets are bundled and automatically copied to the build output directory via `JukeboxVisualizations.csproj`.*
+
+---
+
+## 🚀 How to Use in Your Project
+
+Adding rich, interactive music visualizations to your own Avalonia application is incredibly straightforward.
+
+### 1. Reference the Library
+Add `JukeboxVisualizations` to your solution, or directly reference the compiled `JukeboxVisualizations.dll` in your project dependencies.
+
+### 2. Add the XAML Namespace
+At the top of your Avalonia Window or UserControl (`.axaml` file), include the visualizations namespace:
 
 ```xml
 xmlns:vis="clr-namespace:JukeboxVisualizations.Controls;assembly=JukeboxVisualizations"
+```
 
-<vis:ProjectMControl Name="VisualizerControl" />
+### 3. Drop in the Control
+Place the `ProjectMControl` anywhere in your layout. It will automatically resize to fill its parent container:
+
+```xml
+<Grid Background="Black">
+    <vis:ProjectMControl Name="MyVisualizer" />
+</Grid>
+```
+
+### 4. Feed it Audio Data (C#)
+To make the visualizer react to music, you must feed it raw PCM audio samples (e.g., from an audio player like LibVLCSharp, NAudio, or Bass.NET). The control exposes a simple `AddAudioFloat` method that you can call inside your audio playback loop:
+
+```csharp
+// Example using LibVLCSharp audio callbacks or a standard audio buffer loop
+public void OnAudioFrameReceived(float[] pcmSamples, uint sampleCount)
+{
+    // Pass the raw 32-bit float audio samples to the visualizer
+    // projectM handles the beat detection and FFT analysis automatically!
+    MyVisualizer.AddAudioFloat(pcmSamples, sampleCount, ProjectMChannels.Mono);
+}
+```
+
+### 5. Control the Flow (C#)
+You can command the visualizer to load new presets randomly or sequentially:
+
+```csharp
+// Automatically load a random .milk preset from the bundled ProjectM/ presets folder
+MyVisualizer.LoadRandomPreset();
+
+// Or load a specific preset file
+MyVisualizer.LoadPreset(@"ProjectM\presets\Some Awesome Preset.milk");
 ```
