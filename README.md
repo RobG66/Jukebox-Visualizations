@@ -1,6 +1,6 @@
 # Jukebox-Visualizations
 
-**Jukebox-Visualizations** is a fully self-contained Avalonia UI control library that provides high-performance, OpenGL-accelerated audio visualizations via the renowned [libprojectM](https://github.com/projectM-visualizer/projectm) engine. 
+**Jukebox-Visualizations** is a fully self-contained Avalonia UI control library that provides high-performance, OpenGL-accelerated audio visualizations via the [libprojectM](https://github.com/projectM-visualizer/projectm) engine. 
 
 It provides an out-of-the-box, plug-and-play solution for integrating stunning, music-reactive visuals into any Avalonia application. Included in this repository is the complete suite of native C++ dependencies and a massive library of over 9,400+ hand-crafted `.milk` presets and textures, ensuring you have an endless variety of dynamic visuals instantly available.
 
