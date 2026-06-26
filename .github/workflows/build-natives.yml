@@ -138,14 +138,29 @@ jobs:
           vcpkg install glew:x64-windows
 
       - name: Configure libprojectM build (CMake)
+        # Use bash shell so backslash line continuations work (PowerShell
+        # treats `\` as a file redirection, mangling multi-line commands).
+        shell: bash
         run: |
+          # Verify vcpkg toolchain is available.
+          echo "VCPKG_ROOT=$VCPKG_ROOT"
+          if [ ! -f "$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" ]; then
+            echo "ERROR: vcpkg.cmake toolchain file not found at $VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" >&2
+            exit 1
+          fi
+
+          # Use the default generator (Visual Studio on Windows). Ninja
+          # would be cleaner but requires an extra setup step; VS works
+          # out of the box with the vcpkg toolchain file.
           cmake -S ${{ env.PROJECTM_SRC_DIR }} -B ${{ env.PROJECTM_SRC_DIR }}/build \
-            -DCMAKE_BUILD_TYPE=Release \
-            -G "Ninja" \
-            -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake \
+            -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
             -DPROJECTM_NATIVE_ARCH=ON
 
       - name: Build libprojectM
+        shell: bash
+        # --config Release is required for multi-config generators like
+        # Visual Studio (which doesn't honor CMAKE_BUILD_TYPE at configure
+        # time the way single-config generators like Ninja do).
         run: cmake --build ${{ env.PROJECTM_SRC_DIR }}/build --config Release --parallel
 
       - name: Stage artifacts
@@ -156,14 +171,20 @@ jobs:
 
           # The libprojectM.dll build output is typically at
           # projectm-src/build/Debug/ or projectm-src/build/Release/
-          # depending on the generator. Search for it defensively.
-          $dll = Get-ChildItem -Path "${{ env.PROJECTM_SRC_DIR }}/build" -Recurse -Filter "libprojectM.dll" -ErrorAction SilentlyContinue | Select-Object -First 1
+          # depending on the generator. projectM 4.x may also name the
+          # library with a -4 suffix (libprojectM-4.dll). Search for
+          # both patterns defensively.
+          $dll = Get-ChildItem -Path "${{ env.PROJECTM_SRC_DIR }}/build" -Recurse -Filter "libprojectM*.dll" -ErrorAction SilentlyContinue |
+                 Where-Object { $_.Name -match '^libprojectM(-4)?\.dll$' } |
+                 Select-Object -First 1
           if (-not $dll) {
             # Diagnostic: list everything in the build tree so we can see
             # where the DLL actually landed.
             Write-Host "ERROR: libprojectM.dll not found in build output." -ForegroundColor Red
-            Write-Host "Listing ${{ env.PROJECTM_SRC_DIR }}/build/ contents (recursive):" -ForegroundColor Yellow
-            Get-ChildItem -Path "${{ env.PROJECTM_SRC_DIR }}/build" -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "  $($_.FullName)" }
+            Write-Host "Listing ${{ env.PROJECTM_SRC_DIR }}/build/ contents (recursive, .dll and .lib only):" -ForegroundColor Yellow
+            Get-ChildItem -Path "${{ env.PROJECTM_SRC_DIR }}/build" -Recurse -File -ErrorAction SilentlyContinue |
+              Where-Object { $_.Extension -in @('.dll', '.lib') } |
+              ForEach-Object { Write-Host "  $($_.FullName)" }
             throw "libprojectM.dll not found in build output"
           }
           Copy-Item $dll.FullName -Destination "$stage/libprojectM.dll"
@@ -282,14 +303,20 @@ jobs:
           stage="staging"
           mkdir -p "$stage"
 
-          # The .so file may be named libprojectM.so.4.1.6 with symlinks
-          # libprojectM.so.4 and libprojectM.so pointing at it. We want
-          # the actual file (not the symlink), renamed to libprojectM.so.4
-          # so JukeboxVisualizations can load it by that name.
+          # projectM 4.x names the shared library with the major version
+          # baked into the base name, e.g. `libprojectM-4.so.4.1.6` (note
+          # the `-4` before `.so`). The Jukebox's ProjectMNative.cs loader
+          # expects the file to be named `libprojectM.so.4`, so we find
+          # the actual .so file (any variant) and copy it with that name.
+          #
+          # We exclude the playlist library (libprojectM-4-playlist.so)
+          # since the Jukebox only needs the main libprojectM library.
           #
           # Search the entire projectm-src/ tree (not just build/) in case
           # the .so lands somewhere unexpected.
-          so_file=$(find ${{ env.PROJECTM_SRC_DIR }} -name 'libprojectM.so*' -type f | head -n 1)
+          so_file=$(find ${{ env.PROJECTM_SRC_DIR }} -type f -name 'libprojectM*.so*' | \
+                    grep -v 'playlist' | \
+                    head -n 1)
           if [ -z "$so_file" ]; then
             echo "ERROR: libprojectM.so not found in build output" >&2
             echo "" >&2
@@ -300,7 +327,9 @@ jobs:
             find ${{ env.PROJECTM_SRC_DIR }} -type f \( -name '*.so*' -o -name '*.a' \) >&2 || echo "  (none found)" >&2
             exit 1
           fi
+          echo "Found: $so_file"
           cp "$so_file" "$stage/libprojectM.so.4"
+          echo "Staged as: $stage/libprojectM.so.4"
 
           # LICENSE — required for LGPL redistribution.
           cp ${{ env.PROJECTM_SRC_DIR }}/LICENSE "$stage/libprojectM-LICENSE.txt" 2>/dev/null || \
