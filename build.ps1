@@ -14,7 +14,7 @@
         │   ├── libprojectM.so.4              (Linux   — from source lib/)
         │   └── glew32.dll                    (Windows — from source lib/)
         └── ProjectM/                         (preset data only)
-            ├── Presets/
+            ├── presets/
             └── textures/
 
     The user drops this entire `publish/stage/` content next to Jukebox.exe
@@ -49,7 +49,7 @@ if (-not (Test-Path "JukeboxVisualizations.csproj")) {
 $sourceProjectM = ".\ProjectM"
 if (-not (Test-Path $sourceProjectM)) {
     Write-Host "ERROR: Source 'ProjectM' folder not found at $sourceProjectM" -ForegroundColor Red
-    Write-Host "       The ProjectM folder (containing Presets/) must be present" -ForegroundColor Red
+    Write-Host "       The ProjectM folder (containing presets/) must be present" -ForegroundColor Red
     Write-Host "       in the project root before building." -ForegroundColor Red
     exit 1
 }
@@ -161,7 +161,7 @@ foreach ($file in @(
     }
 }
 
-# 3) ProjectM preset data (Presets/, textures/, and anything else under
+# 3) ProjectM preset data (presets/, textures/, and anything else under
 #    the source ProjectM/ folder except native subfolders).
 foreach ($entry in Get-ChildItem $sourceProjectM -Force) {
     if ($entry.Name -in @("win-x64", "linux-x64", "osx-arm64", "osx-x64")) {

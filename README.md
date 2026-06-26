@@ -41,7 +41,7 @@ The native `libprojectM` binaries (and the **GLEW** extension wrangler `glew32.d
 │   ├── README.md                   # lists required files per platform
 │   └── .gitignore                  # ignores binaries, keeps README
 ├── ProjectM/                       # ← preset data shipped with the repo
-│   ├── Presets/
+│   ├── presets/
 │   │   └── (... 9,400+ .milk files)
 │   └── textures/
 ├── natives.json                    # manifest of native binary URLs + SHA-256s
@@ -97,7 +97,7 @@ publish/stage/
 │   ├── libprojectM.so.4                (Linux   — from source lib/)
 │   └── glew32.dll                      (Windows — from source lib/)
 └── ProjectM/                           ← preset data only
-    ├── Presets/
+    ├── presets/
     └── textures/
 ```
 
@@ -142,7 +142,7 @@ The final runtime layout in the Jukebox directory will be:
 │   ├── libprojectM.so.4               (this repo — Linux)
 │   └── glew32.dll                     (this repo — Windows only)
 └── ProjectM/                          ← preset data only
-    ├── Presets/
+    ├── presets/
     └── textures/
 ```
 
@@ -184,7 +184,7 @@ Load specific presets via `LoadPreset`:
 
 ```csharp
 // Load a specific .milk preset file
-MyVisualizer.LoadPreset(@"ProjectM\Presets\Some Awesome Preset.milk");
+MyVisualizer.LoadPreset(@"ProjectM\presets\Some Awesome Preset.milk");
 ```
 
 ---

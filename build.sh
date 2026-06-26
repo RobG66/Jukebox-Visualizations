@@ -25,7 +25,7 @@ fi
 SOURCE_PROJECTM="./ProjectM"
 if [[ ! -d "$SOURCE_PROJECTM" ]]; then
     echo "ERROR: Source 'ProjectM' folder not found at $SOURCE_PROJECTM" >&2
-    echo "       The ProjectM folder (containing Presets/) must be present" >&2
+    echo "       The ProjectM folder (containing presets/) must be present" >&2
     echo "       in the project root before building." >&2
     exit 1
 fi
@@ -126,7 +126,7 @@ for file in JukeboxVisualizations.dll JukeboxVisualizations.deps.json; do
     fi
 done
 
-# 3) ProjectM preset data (Presets/, textures/, and anything else under
+# 3) ProjectM preset data (presets/, textures/, and anything else under
 #    the source ProjectM/ folder except native subfolders).
 mkdir -p "$DEST/ProjectM"
 for entry in "$SOURCE_PROJECTM"/*; do

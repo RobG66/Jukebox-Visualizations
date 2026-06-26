@@ -21,7 +21,7 @@
       location populated by a separate setup script. The Condition guard
       ensures the build succeeds even when lib/ is empty.
 
-      ProjectM preset data (Presets/, textures/) is shipped separately
+      ProjectM preset data (presets/, textures/) is shipped separately
       via the ProjectM/ folder; this content is not native code.
     -->
     <Content Include="lib\**\*" Condition="Exists('lib\')">
