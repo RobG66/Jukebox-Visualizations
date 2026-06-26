@@ -38,42 +38,54 @@ The native `libprojectM` binaries (and the **GLEW** extension wrangler `glew32.d
 ├── Native/
 │   └── ProjectMNative.cs           # P/Invoke declarations for libprojectM
 ├── lib/                            # ← native runtime drop-in (empty in repo)
-│   ├── README.md                   # lists required files per platform
+│   ├── README.md                   # instructions for populating lib/
 │   └── .gitignore                  # ignores binaries, keeps README
 ├── ProjectM/                       # ← preset data shipped with the repo
 │   ├── presets/
 │   │   └── (... 9,400+ .milk files)
 │   └── textures/
-├── natives.json                    # manifest of native binary URLs + SHA-256s
-├── fetch-natives.ps1               # Windows: download natives into lib/
-├── fetch-natives.sh                # Linux/macOS: same
-├── build.ps1                       # Windows build script (calls fetch-natives)
-├── build.sh                        # Linux/macOS build script (calls fetch-natives)
+├── build.ps1                       # Windows build script (stages drop-in zip)
+├── build.sh                        # Linux/macOS build script (same)
 ├── THIRD_PARTY_LICENSES.md         # licensing for libprojectM, GLEW, etc.
 ├── .github/workflows/
 │   └── build-natives.yml           # CI: builds libprojectM from source → GitHub release
 └── README.md                       # this file
 ```
 
-The `lib/` folder is intentionally empty — third-party native binaries are not shipped. Populate it by running the fetch-natives script (see [Build](#-build) below).
+The `lib/` folder is intentionally empty — third-party native binaries are not shipped in the repo. Populate it manually by downloading from the GitHub release produced by the CI workflow (see [Fetch native dependencies](#-fetch-native-dependencies) below).
 
 ---
 
 ## 📥 Fetch native dependencies
 
-The `lib/` folder must be populated with `libprojectM.dll` / `libprojectM.so.4` (+ `glew32.dll` on Windows) before the build can produce a working drop-in zip. Run:
+The `lib/` folder must be populated with `libprojectM.dll` / `libprojectM.so.4` (+ `glew32.dll` on Windows) before the build can produce a working drop-in zip.
 
-```bash
-# Windows
-.\fetch-natives.ps1
+### Steps
 
-# Linux / macOS
-./fetch-natives.sh
-```
+1. Go to: https://github.com/RobG66/Jukebox-Visualizations/releases
+2. Find the latest "Native dependencies" release.
+3. Download the asset for your platform:
+   - Windows: `libprojectM-win-x64.zip`
+   - Linux:   `libprojectM-linux-x64.tar.gz`
+4. Extract into the `lib/` folder at the root of this repo. The archive extracts flat — you should end up with:
+   - `lib/libprojectM.dll` (Windows) or `lib/libprojectM.so.4` (Linux)
+   - `lib/glew32.dll` (Windows only)
+   - `lib/libprojectM-LICENSE.txt`
+   - `lib/glew-LICENSE.txt` (Windows only)
+   - `lib/BUILD-INFO.txt`
 
-The script reads `natives.json` (the manifest of URLs + SHA-256 checksums), downloads each asset for the current platform, verifies the checksum, and extracts into `lib/`. It's idempotent — safe to re-run; pass `-Force` / `--force` to re-download everything.
+After populating `lib/`, run the build script (see [Build](#-build) below) to produce the drop-in zip.
 
-The native binaries are built from upstream projectM source by the `build-natives.yml` CI workflow (see [.github/workflows/build-natives.yml](.github/workflows/build-natives.yml)). To update libprojectM, edit `PROJECTM_REF` in that workflow, trigger a rebuild, then bump the URL + SHA-256 in `natives.json`. See [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) for licensing.
+### Updating libprojectM
+
+The native binaries are built from upstream projectM source by the `build-natives.yml` CI workflow. To update to a newer version of libprojectM:
+
+1. Edit `PROJECTM_REF` in [.github/workflows/build-natives.yml](.github/workflows/build-natives.yml) to point at the new upstream tag.
+2. Commit and push the workflow file.
+3. Trigger the workflow (manual dispatch from the Actions UI, or push a `natives-v*` tag).
+4. Once the new release is published, re-download the asset and extract into `lib/` (overwriting the old version).
+
+See [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) for licensing.
 
 ---
 

@@ -32,28 +32,25 @@ fi
 
 SOURCE_LIB="./lib"
 
-# ── Auto-fetch natives if lib/ is empty ─────────────────────────────
+# ── Verify lib/ is populated ─────────────────────────────────────────
+# The user must manually download the libprojectM binary from the GitHub
+# release (see lib/README.md for instructions). We don't auto-fetch —
+# that would require extra dependencies. Just check that lib/ has
+# something in it and warn if not.
 lib_populated=false
 if [[ -d "$SOURCE_LIB" ]] && [[ -n "$(ls -A "$SOURCE_LIB" 2>/dev/null | grep -v -E '^(README\.md|\.gitignore)$')" ]]; then
     lib_populated=true
 fi
 if [[ "$lib_populated" != "true" ]]; then
-    echo "lib/ is empty — running fetch-natives.sh to populate it..."
-    if [[ -f "./fetch-natives.sh" ]]; then
-        ./fetch-natives.sh
-        if [[ $? -ne 0 ]]; then
-            echo "ERROR: fetch-natives.sh failed. Aborting build." >&2
-            exit 1
-        fi
-        # Re-check after fetch.
-        if [[ -d "$SOURCE_LIB" ]] && [[ -n "$(ls -A "$SOURCE_LIB" 2>/dev/null | grep -v -E '^(README\.md|\.gitignore)$')" ]]; then
-            lib_populated=true
-        fi
-    else
-        echo "WARNING: fetch-natives.sh not found at ./fetch-natives.sh"
-        echo "         The build will succeed but native libprojectM binaries"
-        echo "         will not be staged. Populate lib/ before distributing."
-    fi
+    echo "WARNING: lib/ is empty or missing."
+    echo "         The build will succeed but native libprojectM binaries"
+    echo "         will not be staged in the drop-in zip."
+    echo ""
+    echo "         To populate lib/:"
+    echo "           1. Go to https://github.com/RobG66/Jukebox-Visualizations/releases"
+    echo "           2. Download libprojectM-win-x64.zip (or libprojectM-linux-x64.tar.gz)"
+    echo "           3. Extract into lib/"
+    echo "         See lib/README.md for details."
     echo ""
 fi
 

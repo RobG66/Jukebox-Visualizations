@@ -19,8 +19,9 @@
 
     The user drops this entire `publish/stage/` content next to Jukebox.exe
     to enable visualizations. The native lib/ folder is NOT shipped in this
-    repo — the user populates `lib/` separately (a fetch-natives script
-    is planned).
+    repo — the developer populates `lib/` manually by downloading from
+    the GitHub release produced by the build-natives.yml CI workflow
+    (see lib/README.md for instructions).
 
     The managed JukeboxVisualizations.dll is pure IL — identical for
     every platform. We run `dotnet publish` for both win-x64 and
@@ -56,25 +57,22 @@ if (-not (Test-Path $sourceProjectM)) {
 
 $sourceLib = ".\lib"
 
-# ── Auto-fetch natives if lib/ is empty ─────────────────────────────────
+# ── Verify lib/ is populated ────────────────────────────────────────────
+# The user must manually download the libprojectM binary from the GitHub
+# release (see lib/README.md for instructions). We don't auto-fetch —
+# PowerShell execution policies and script dependencies make that fragile.
+# Just check that lib/ has something in it and warn if not.
 $libPopulated = (Test-Path $sourceLib) -and ((Get-ChildItem $sourceLib -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -notin @("README.md", ".gitignore") }).Count -gt 0)
 if (-not $libPopulated) {
-    Write-Host "lib/ is empty — running fetch-natives.ps1 to populate it..." -ForegroundColor Yellow
-    $fetchScript = ".\fetch-natives.ps1"
-    if (Test-Path $fetchScript) {
-        & $fetchScript
-        if ($LASTEXITCODE -ne 0) {
-            Write-Host "ERROR: fetch-natives.ps1 failed. Aborting build." -ForegroundColor Red
-            exit 1
-        }
-        # Re-check after fetch.
-        $libPopulated = (Get-ChildItem $sourceLib -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -notin @("README.md", ".gitignore") }).Count -gt 0
-    }
-    else {
-        Write-Host "WARNING: fetch-natives.ps1 not found at $fetchScript" -ForegroundColor Yellow
-        Write-Host "         The build will succeed but native libprojectM binaries" -ForegroundColor Yellow
-        Write-Host "         will not be staged. Populate lib/ before distributing." -ForegroundColor Yellow
-    }
+    Write-Host "WARNING: lib/ is empty or missing." -ForegroundColor Yellow
+    Write-Host "         The build will succeed but native libprojectM binaries" -ForegroundColor Yellow
+    Write-Host "         will not be staged in the drop-in zip." -ForegroundColor Yellow
+    Write-Host "" -ForegroundColor Yellow
+    Write-Host "         To populate lib/:" -ForegroundColor Yellow
+    Write-Host "           1. Go to https://github.com/RobG66/Jukebox-Visualizations/releases" -ForegroundColor Yellow
+    Write-Host "           2. Download libprojectM-win-x64.zip (or libprojectM-linux-x64.tar.gz)" -ForegroundColor Yellow
+    Write-Host "           3. Extract into lib/" -ForegroundColor Yellow
+    Write-Host "         See lib/README.md for details." -ForegroundColor Yellow
     Write-Host ""
 }
 

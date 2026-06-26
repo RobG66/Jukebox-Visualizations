@@ -434,7 +434,7 @@ jobs:
 
             - `libprojectM-win-x64.zip` — contains `libprojectM.dll`, `glew32.dll`, LICENSE files
             - `libprojectM-linux-x64.tar.gz` — contains `libprojectM.so.4`, LICENSE files
-            - `checksums.sha256` — SHA-256 of each archive
+            - `checksums.sha256` — SHA-256 of each archive (for verification)
 
             ## Licensing
 
@@ -443,9 +443,34 @@ jobs:
 
             See `THIRD_PARTY_LICENSES.md` in the repository for details.
 
-            ## How to use
+            ## How to use these binaries
 
-            Update `natives.json` in both the Jukebox-Visualizations and Jukebox repos with the URLs and SHA-256s from `checksums.sha256`, then commit and push.
+            These binaries go into the `lib/` folder of the Jukebox-Visualizations
+            repo, then get bundled into the drop-in zip by `build.ps1` / `build.sh`.
+
+            ### For Jukebox-Visualizations developers (building the drop-in zip)
+
+            1. Download the asset for your platform:
+               - Windows: `libprojectM-win-x64.zip`
+               - Linux:   `libprojectM-linux-x64.tar.gz`
+            2. Extract into the `lib/` folder at the root of your local
+               Jukebox-Visualizations repo. The archive extracts flat —
+               `lib/libprojectM.dll`, `lib/glew32.dll`, `lib/libprojectM-LICENSE.txt`, etc.
+            3. Run `build.ps1` (Windows) or `build.sh` (Linux/macOS) to
+               produce `publish/Jukebox-Visualizations-dropin.zip`.
+            4. The drop-in zip is what end users drop into their Jukebox
+               build output directory.
+
+            See `lib/README.md` in the repo for more details.
+
+            ### For end users (using the drop-in zip)
+
+            End users don't download from this release directly. Instead,
+            they download `Jukebox-Visualizations-dropin.zip` from the
+            latest release on the Jukebox-Visualizations repo (which is
+            produced by `build.ps1` / `build.sh` and includes both the
+            managed wrapper and these native binaries in a single `lib/`
+            folder, plus the preset data in a `ProjectM/` folder).
           files: |
             libprojectM-win-x64.zip
             libprojectM-linux-x64.tar.gz

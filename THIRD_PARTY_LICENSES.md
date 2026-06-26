@@ -8,20 +8,19 @@ and copyleft license terms.
 
 For the avoidance of doubt: **Jukebox-Visualizations does not commit
 third-party native binaries (`.dll` / `.so` / `.dylib`) to this
-repository.** They are fetched at build time via the
-`fetch-natives.ps1` / `fetch-natives.sh` script, which downloads them
-from a project-managed GitHub release produced by the
-`build-natives.yml` CI workflow. See [README.md](README.md) for
-details.
+repository.** They are downloaded manually by the developer from the
+GitHub release produced by the `build-natives.yml` CI workflow, then
+placed in the `lib/` folder. See [README.md](README.md) and
+[`lib/README.md`](lib/README.md) for details.
 
 ---
 
 ## Native runtime libraries (dropped into `lib/`)
 
 These are unmanaged native binaries loaded at runtime by
-`Native/ProjectMNative.cs`. They are NOT committed to the repo — see
-`fetch-natives.ps1` / `fetch-natives.sh` and
-`.github/workflows/build-natives.yml`.
+`Native/ProjectMNative.cs`. They are NOT committed to the repo — the
+developer downloads and places them manually. See `lib/README.md` for
+the list of required files per platform and where to download each one.
 
 ### ProjectM (`libprojectM.dll` / `libprojectM.so.4`)
 
