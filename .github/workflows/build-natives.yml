@@ -64,6 +64,10 @@ on:
 env:
   PROJECTM_REF: 'v4.1.6'  # https://github.com/projectM-visualizer/projectm/tags
   PROJECTM_REPO: 'https://github.com/projectM-visualizer/projectm.git'
+  # Clone into projectm-src/ (not projectm/) to avoid case-insensitive
+  # filesystem collisions with the ProjectM/ preset folder that ships
+  # in this repo on Windows.
+  PROJECTM_SRC_DIR: 'projectm-src'
 
 # ── Permissions ──────────────────────────────────────────────────────
 # The publish job needs `contents: write` to create a GitHub release
@@ -98,27 +102,32 @@ jobs:
           # --shallow-submodules because some submodule hosts don't allow
           # shallow fetch of arbitrary SHAs — a full submodule clone is
           # slower but more reliable.
-          git clone --depth 1 --recurse-submodules --branch ${{ env.PROJECTM_REF }} ${{ env.PROJECTM_REPO }} projectm
+          #
+          # We clone into projectm-src/ (not projectm/) because this repo
+          # ships a ProjectM/ preset folder, and Windows filesystems are
+          # case-insensitive — git would refuse to create projectm/ next
+          # to an existing ProjectM/.
+          git clone --depth 1 --recurse-submodules --branch ${{ env.PROJECTM_REF }} ${{ env.PROJECTM_REPO }} ${{ env.PROJECTM_SRC_DIR }}
 
           # Verify the submodules actually got fetched — fail loudly if
           # not, with diagnostic output, instead of letting CMake fail
           # later with a confusing error.
-          if [ ! -f "projectm/vendor/projectm-eval/CMakeLists.txt" ]; then
+          if [ ! -f "${{ env.PROJECTM_SRC_DIR }}/vendor/projectm-eval/CMakeLists.txt" ]; then
             echo "ERROR: projectm-eval submodule is missing or empty after clone." >&2
             echo "" >&2
             echo "       .gitmodules content:" >&2
-            cat projectm/.gitmodules >&2 || echo "       (no .gitmodules file)" >&2
+            cat ${{ env.PROJECTM_SRC_DIR }}/.gitmodules >&2 || echo "       (no .gitmodules file)" >&2
             echo "" >&2
-            echo "       Listing projectm/vendor/ contents:" >&2
-            ls -la projectm/vendor/ >&2 || true
+            echo "       Listing ${{ env.PROJECTM_SRC_DIR }}/vendor/ contents:" >&2
+            ls -la ${{ env.PROJECTM_SRC_DIR }}/vendor/ >&2 || true
             echo "" >&2
-            echo "       Listing projectm/vendor/projectm-eval/ contents (if it exists):" >&2
-            ls -la projectm/vendor/projectm-eval/ >&2 || true
+            echo "       Listing ${{ env.PROJECTM_SRC_DIR }}/vendor/projectm-eval/ contents (if it exists):" >&2
+            ls -la ${{ env.PROJECTM_SRC_DIR }}/vendor/projectm-eval/ >&2 || true
             exit 1
           fi
 
           # Record the exact commit we built from — goes into the release notes.
-          cd projectm
+          cd ${{ env.PROJECTM_SRC_DIR }}
           echo "PROJECTM_COMMIT=$(git rev-parse HEAD)" >> $GITHUB_ENV
           cd ..
 
@@ -130,14 +139,14 @@ jobs:
 
       - name: Configure libprojectM build (CMake)
         run: |
-          cmake -S projectm -B projectm/build \
+          cmake -S ${{ env.PROJECTM_SRC_DIR }} -B ${{ env.PROJECTM_SRC_DIR }}/build \
             -DCMAKE_BUILD_TYPE=Release \
             -G "Ninja" \
             -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake \
             -DPROJECTM_NATIVE_ARCH=ON
 
       - name: Build libprojectM
-        run: cmake --build projectm/build --config Release --parallel
+        run: cmake --build ${{ env.PROJECTM_SRC_DIR }}/build --config Release --parallel
 
       - name: Stage artifacts
         shell: pwsh
@@ -146,10 +155,15 @@ jobs:
           New-Item -ItemType Directory -Force -Path $stage | Out-Null
 
           # The libprojectM.dll build output is typically at
-          # projectm/build/Debug/ or projectm/build/Release/ depending
-          # on the generator. Search for it defensively.
-          $dll = Get-ChildItem -Path "projectm/build" -Recurse -Filter "libprojectM.dll" -ErrorAction SilentlyContinue | Select-Object -First 1
+          # projectm-src/build/Debug/ or projectm-src/build/Release/
+          # depending on the generator. Search for it defensively.
+          $dll = Get-ChildItem -Path "${{ env.PROJECTM_SRC_DIR }}/build" -Recurse -Filter "libprojectM.dll" -ErrorAction SilentlyContinue | Select-Object -First 1
           if (-not $dll) {
+            # Diagnostic: list everything in the build tree so we can see
+            # where the DLL actually landed.
+            Write-Host "ERROR: libprojectM.dll not found in build output." -ForegroundColor Red
+            Write-Host "Listing ${{ env.PROJECTM_SRC_DIR }}/build/ contents (recursive):" -ForegroundColor Yellow
+            Get-ChildItem -Path "${{ env.PROJECTM_SRC_DIR }}/build" -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "  $($_.FullName)" }
             throw "libprojectM.dll not found in build output"
           }
           Copy-Item $dll.FullName -Destination "$stage/libprojectM.dll"
@@ -164,8 +178,8 @@ jobs:
           }
 
           # LICENSE files — required for LGPL redistribution.
-          Copy-Item "projectm/LICENSE" -Destination "$stage/libprojectM-LICENSE.txt" -ErrorAction SilentlyContinue
-          Copy-Item "projectm/COPYING" -Destination "$stage/libprojectM-LICENSE.txt" -ErrorAction SilentlyContinue
+          Copy-Item "${{ env.PROJECTM_SRC_DIR }}/LICENSE" -Destination "$stage/libprojectM-LICENSE.txt" -ErrorAction SilentlyContinue
+          Copy-Item "${{ env.PROJECTM_SRC_DIR }}/COPYING" -Destination "$stage/libprojectM-LICENSE.txt" -ErrorAction SilentlyContinue
 
           # GLEW LICENSE
           $glewLicense = Get-ChildItem -Path "$env:VCPKG_ROOT/installed/x64-windows/share/glew" -Filter "LICENSE*" -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -225,58 +239,72 @@ jobs:
           # --shallow-submodules because some submodule hosts don't allow
           # shallow fetch of arbitrary SHAs — a full submodule clone is
           # slower but more reliable.
-          git clone --depth 1 --recurse-submodules --branch ${{ env.PROJECTM_REF }} ${{ env.PROJECTM_REPO }} projectm
+          #
+          # We clone into projectm-src/ (not projectm/) for consistency
+          # with the Windows job (where it's required due to case-
+          # insensitive filesystem collisions with the ProjectM/ preset
+          # folder).
+          git clone --depth 1 --recurse-submodules --branch ${{ env.PROJECTM_REF }} ${{ env.PROJECTM_REPO }} ${{ env.PROJECTM_SRC_DIR }}
 
           # Verify the submodules actually got fetched — fail loudly if
           # not, with diagnostic output, instead of letting CMake fail
           # later with a confusing error.
-          if [ ! -f "projectm/vendor/projectm-eval/CMakeLists.txt" ]; then
+          if [ ! -f "${{ env.PROJECTM_SRC_DIR }}/vendor/projectm-eval/CMakeLists.txt" ]; then
             echo "ERROR: projectm-eval submodule is missing or empty after clone." >&2
             echo "" >&2
             echo "       .gitmodules content:" >&2
-            cat projectm/.gitmodules >&2 || echo "       (no .gitmodules file)" >&2
+            cat ${{ env.PROJECTM_SRC_DIR }}/.gitmodules >&2 || echo "       (no .gitmodules file)" >&2
             echo "" >&2
-            echo "       Listing projectm/vendor/ contents:" >&2
-            ls -la projectm/vendor/ >&2 || true
+            echo "       Listing ${{ env.PROJECTM_SRC_DIR }}/vendor/ contents:" >&2
+            ls -la ${{ env.PROJECTM_SRC_DIR }}/vendor/ >&2 || true
             echo "" >&2
-            echo "       Listing projectm/vendor/projectm-eval/ contents (if it exists):" >&2
-            ls -la projectm/vendor/projectm-eval/ >&2 || true
+            echo "       Listing ${{ env.PROJECTM_SRC_DIR }}/vendor/projectm-eval/ contents (if it exists):" >&2
+            ls -la ${{ env.PROJECTM_SRC_DIR }}/vendor/projectm-eval/ >&2 || true
             exit 1
           fi
 
-          cd projectm
+          cd ${{ env.PROJECTM_SRC_DIR }}
           echo "PROJECTM_COMMIT=$(git rev-parse HEAD)" >> $GITHUB_ENV
           cd ..
 
       - name: Configure libprojectM build (CMake)
         run: |
-          cmake -S projectm -B projectm/build \
+          cmake -S ${{ env.PROJECTM_SRC_DIR }} -B ${{ env.PROJECTM_SRC_DIR }}/build \
             -DCMAKE_BUILD_TYPE=Release \
             -G "Ninja" \
             -DPROJECTM_NATIVE_ARCH=ON
 
       - name: Build libprojectM
-        run: cmake --build projectm/build --config Release --parallel
+        run: cmake --build ${{ env.PROJECTM_SRC_DIR }}/build --config Release --parallel
 
       - name: Stage artifacts
         run: |
           stage="staging"
           mkdir -p "$stage"
 
-          # The .so file may be named libprojectM.so.4.1.0 with symlinks
+          # The .so file may be named libprojectM.so.4.1.6 with symlinks
           # libprojectM.so.4 and libprojectM.so pointing at it. We want
           # the actual file (not the symlink), renamed to libprojectM.so.4
           # so JukeboxVisualizations can load it by that name.
-          so_file=$(find projectm/build -name 'libprojectM.so*' -type f | head -n 1)
+          #
+          # Search the entire projectm-src/ tree (not just build/) in case
+          # the .so lands somewhere unexpected.
+          so_file=$(find ${{ env.PROJECTM_SRC_DIR }} -name 'libprojectM.so*' -type f | head -n 1)
           if [ -z "$so_file" ]; then
             echo "ERROR: libprojectM.so not found in build output" >&2
+            echo "" >&2
+            echo "Diagnostic: listing all files under ${{ env.PROJECTM_SRC_DIR }}/build/ (recursive):" >&2
+            find ${{ env.PROJECTM_SRC_DIR }}/build -type f -name '*.so*' >&2 || echo "  (no .so files found)" >&2
+            echo "" >&2
+            echo "Diagnostic: listing all .so and .a files under ${{ env.PROJECTM_SRC_DIR }}/ (recursive):" >&2
+            find ${{ env.PROJECTM_SRC_DIR }} -type f \( -name '*.so*' -o -name '*.a' \) >&2 || echo "  (none found)" >&2
             exit 1
           fi
           cp "$so_file" "$stage/libprojectM.so.4"
 
           # LICENSE — required for LGPL redistribution.
-          cp projectm/LICENSE "$stage/libprojectM-LICENSE.txt" 2>/dev/null || \
-            cp projectm/COPYING "$stage/libprojectM-LICENSE.txt" 2>/dev/null || \
+          cp ${{ env.PROJECTM_SRC_DIR }}/LICENSE "$stage/libprojectM-LICENSE.txt" 2>/dev/null || \
+            cp ${{ env.PROJECTM_SRC_DIR }}/COPYING "$stage/libprojectM-LICENSE.txt" 2>/dev/null || \
             echo "WARNING: projectM LICENSE file not found" >&2
 
           # Build info — records what was built, from what source, when.
