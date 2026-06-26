@@ -37,7 +37,7 @@
 # ── Updating the libprojectM version ─────────────────────────────────
 # To build a newer version of libprojectM:
 #   1. Edit PROJECTM_REF below to point at the new upstream tag, branch,
-#      or commit hash (e.g. 'v4.1.0' or a specific commit SHA).
+#      or commit hash (e.g. 'v4.1.6' or a specific commit SHA).
 #   2. Commit and push this workflow file.
 #   3. Trigger the workflow manually (workflow_dispatch) or push a new
 #      natives-v* tag.
@@ -62,7 +62,7 @@ on:
 # it to a specific tag or commit for reproducibility. Bump this when
 # you want to build a newer version of libprojectM.
 env:
-  PROJECTM_REF: 'v4.1.0'  # https://github.com/projectM-visualizer/projectm/tags
+  PROJECTM_REF: 'v4.1.6'  # https://github.com/projectM-visualizer/projectm/tags
   PROJECTM_REPO: 'https://github.com/projectM-visualizer/projectm.git'
 
 # ── Permissions ──────────────────────────────────────────────────────
@@ -89,9 +89,34 @@ jobs:
       - name: Install CMake
         uses: lukka/get-cmake@latest
 
-      - name: Checkout projectM source
+      - name: Checkout projectM source (with submodules)
+        shell: bash
         run: |
-          git clone --depth 1 --branch ${{ env.PROJECTM_REF }} ${{ env.PROJECTM_REPO }} projectm
+          # projectM uses git submodules for vendor deps (projectm-eval,
+          # etc.) that must be present at CMake configure time. We use
+          # --recurse-submodules to fetch them. We do NOT use
+          # --shallow-submodules because some submodule hosts don't allow
+          # shallow fetch of arbitrary SHAs — a full submodule clone is
+          # slower but more reliable.
+          git clone --depth 1 --recurse-submodules --branch ${{ env.PROJECTM_REF }} ${{ env.PROJECTM_REPO }} projectm
+
+          # Verify the submodules actually got fetched — fail loudly if
+          # not, with diagnostic output, instead of letting CMake fail
+          # later with a confusing error.
+          if [ ! -f "projectm/vendor/projectm-eval/CMakeLists.txt" ]; then
+            echo "ERROR: projectm-eval submodule is missing or empty after clone." >&2
+            echo "" >&2
+            echo "       .gitmodules content:" >&2
+            cat projectm/.gitmodules >&2 || echo "       (no .gitmodules file)" >&2
+            echo "" >&2
+            echo "       Listing projectm/vendor/ contents:" >&2
+            ls -la projectm/vendor/ >&2 || true
+            echo "" >&2
+            echo "       Listing projectm/vendor/projectm-eval/ contents (if it exists):" >&2
+            ls -la projectm/vendor/projectm-eval/ >&2 || true
+            exit 1
+          fi
+
           # Record the exact commit we built from — goes into the release notes.
           cd projectm
           echo "PROJECTM_COMMIT=$(git rev-parse HEAD)" >> $GITHUB_ENV
@@ -192,9 +217,33 @@ jobs:
             libegl1-mesa-dev \
             libglm-dev
 
-      - name: Checkout projectM source
+      - name: Checkout projectM source (with submodules)
         run: |
-          git clone --depth 1 --branch ${{ env.PROJECTM_REF }} ${{ env.PROJECTM_REPO }} projectm
+          # projectM uses git submodules for vendor deps (projectm-eval,
+          # etc.) that must be present at CMake configure time. We use
+          # --recurse-submodules to fetch them. We do NOT use
+          # --shallow-submodules because some submodule hosts don't allow
+          # shallow fetch of arbitrary SHAs — a full submodule clone is
+          # slower but more reliable.
+          git clone --depth 1 --recurse-submodules --branch ${{ env.PROJECTM_REF }} ${{ env.PROJECTM_REPO }} projectm
+
+          # Verify the submodules actually got fetched — fail loudly if
+          # not, with diagnostic output, instead of letting CMake fail
+          # later with a confusing error.
+          if [ ! -f "projectm/vendor/projectm-eval/CMakeLists.txt" ]; then
+            echo "ERROR: projectm-eval submodule is missing or empty after clone." >&2
+            echo "" >&2
+            echo "       .gitmodules content:" >&2
+            cat projectm/.gitmodules >&2 || echo "       (no .gitmodules file)" >&2
+            echo "" >&2
+            echo "       Listing projectm/vendor/ contents:" >&2
+            ls -la projectm/vendor/ >&2 || true
+            echo "" >&2
+            echo "       Listing projectm/vendor/projectm-eval/ contents (if it exists):" >&2
+            ls -la projectm/vendor/projectm-eval/ >&2 || true
+            exit 1
+          fi
+
           cd projectm
           echo "PROJECTM_COMMIT=$(git rev-parse HEAD)" >> $GITHUB_ENV
           cd ..
