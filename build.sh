@@ -1,0 +1,183 @@
+#!/usr/bin/env bash
+#
+# Builds the Jukebox-Visualizations wrapper and stages a self-contained
+# drop-in layout suitable for placing next to Jukebox.exe.
+# Bash equivalent of build.ps1 for Linux/macOS developers.
+#
+# Run from the Jukebox-Visualizations project root (next to
+# JukeboxVisualizations.csproj).
+#
+set -euo pipefail
+
+cd "$(dirname "$0")"
+
+echo "Building Jukebox-Visualizations"
+echo "================================"
+echo ""
+
+# ── Validate source layout ──────────────────────────────────────────
+if [[ ! -f "JukeboxVisualizations.csproj" ]]; then
+    echo "ERROR: JukeboxVisualizations.csproj not found in current directory." >&2
+    echo "       Run this script from the Jukebox-Visualizations project root." >&2
+    exit 1
+fi
+
+SOURCE_PROJECTM="./ProjectM"
+if [[ ! -d "$SOURCE_PROJECTM" ]]; then
+    echo "ERROR: Source 'ProjectM' folder not found at $SOURCE_PROJECTM" >&2
+    echo "       The ProjectM folder (containing Presets/) must be present" >&2
+    echo "       in the project root before building." >&2
+    exit 1
+fi
+
+SOURCE_LIB="./lib"
+
+# ── Auto-fetch natives if lib/ is empty ─────────────────────────────
+lib_populated=false
+if [[ -d "$SOURCE_LIB" ]] && [[ -n "$(ls -A "$SOURCE_LIB" 2>/dev/null | grep -v -E '^(README\.md|\.gitignore)$')" ]]; then
+    lib_populated=true
+fi
+if [[ "$lib_populated" != "true" ]]; then
+    echo "lib/ is empty — running fetch-natives.sh to populate it..."
+    if [[ -f "./fetch-natives.sh" ]]; then
+        ./fetch-natives.sh
+        if [[ $? -ne 0 ]]; then
+            echo "ERROR: fetch-natives.sh failed. Aborting build." >&2
+            exit 1
+        fi
+        # Re-check after fetch.
+        if [[ -d "$SOURCE_LIB" ]] && [[ -n "$(ls -A "$SOURCE_LIB" 2>/dev/null | grep -v -E '^(README\.md|\.gitignore)$')" ]]; then
+            lib_populated=true
+        fi
+    else
+        echo "WARNING: fetch-natives.sh not found at ./fetch-natives.sh"
+        echo "         The build will succeed but native libprojectM binaries"
+        echo "         will not be staged. Populate lib/ before distributing."
+    fi
+    echo ""
+fi
+
+# ── Clean previous builds ───────────────────────────────────────────
+echo "Cleaning previous builds..."
+dotnet clean "JukeboxVisualizations.csproj" --configuration Release >/dev/null 2>&1 || true
+rm -rf ./publish/win-x64 ./publish/linux-x64 ./publish/stage
+mkdir -p ./publish/stage
+echo ""
+
+# ── Windows x64 build ───────────────────────────────────────────────
+echo "Building Windows x64..."
+echo "-----------------------"
+
+dotnet publish "JukeboxVisualizations.csproj" \
+    --configuration Release \
+    --runtime win-x64 \
+    --self-contained false \
+    --output "./publish/win-x64" \
+    -p:DebugType=None \
+    -p:DebugSymbols=false
+
+echo ""
+
+# ── Linux x64 build ─────────────────────────────────────────────────
+echo "Building Linux x64..."
+echo "---------------------"
+
+dotnet publish "JukeboxVisualizations.csproj" \
+    --configuration Release \
+    --runtime linux-x64 \
+    --self-contained false \
+    --output "./publish/linux-x64" \
+    -p:DebugType=None \
+    -p:DebugSymbols=false
+
+echo ""
+
+# ── Stage into publish/stage/ ───────────────────────────────────────
+echo "Staging into ./publish/stage/..."
+echo "--------------------------------"
+
+DEST="./publish/stage"
+mkdir -p "$DEST/lib"
+
+# 1) Native libraries from the source lib/ folder — flat, all platforms
+#    coexist by extension. Goes into <dest>/lib/.
+if [[ "$lib_populated" == "true" ]]; then
+    for entry in "$SOURCE_LIB"/*; do
+        name="$(basename "$entry")"
+        case "$name" in
+            README.md|.gitignore) continue ;;
+        esac
+        cp -r "$entry" "$DEST/lib/"
+    done
+    echo "  Copied native libs: lib/"
+else
+    echo "  Skipped native libs: source lib/ is empty"
+fi
+
+# 2) Managed wrapper — same DLL for both platforms; copy from win-x64.
+#    Also copy deps.json so the runtime can resolve Avalonia + Silk.NET
+#    dependencies when loaded via Assembly.LoadFrom. Lives in <dest>/lib/
+#    alongside the native libprojectM binary — all optional drop-in files
+#    in one place.
+for file in JukeboxVisualizations.dll JukeboxVisualizations.deps.json; do
+    if [[ -f "./publish/win-x64/$file" ]]; then
+        cp "./publish/win-x64/$file" "$DEST/lib/"
+        echo "  Copied: lib/$file"
+    fi
+done
+
+# 3) ProjectM preset data (Presets/, textures/, and anything else under
+#    the source ProjectM/ folder except native subfolders).
+mkdir -p "$DEST/ProjectM"
+for entry in "$SOURCE_PROJECTM"/*; do
+    name="$(basename "$entry")"
+    case "$name" in
+        win-x64|linux-x64|osx-arm64|osx-x64) continue ;;
+    esac
+    cp -r "$entry" "$DEST/ProjectM/"
+    echo "  Copied: ProjectM/$name"
+done
+
+echo ""
+
+# ── Summary ─────────────────────────────────────────────────────────
+echo "================================"
+echo "Stage Complete"
+echo "================================"
+echo ""
+echo "Drop-in layout staged at:"
+echo "  $(cd "$DEST" && pwd)"
+echo ""
+echo "Layout:"
+( cd "$DEST" && find . -maxdepth 2 -print | sort | while read -r p; do
+    p="${p#./}"
+    [[ -z "$p" ]] && continue
+    if [[ -d "$DEST/$p" ]]; then
+        echo "  [DIR] $p"
+    else
+        echo "        $p"
+    fi
+done )
+echo ""
+
+# ── Zip for distribution ────────────────────────────────────────────
+zip_path="./publish/Jukebox-Visualizations-dropin.zip"
+rm -f "$zip_path"
+( cd "$DEST" && zip -r "$OLDPWD/$zip_path" . >/dev/null )
+echo "Zip created:"
+echo "  $(cd "$(dirname "$zip_path")" && pwd)/$(basename "$zip_path")"
+zip_size=$(du -m "$zip_path" | cut -f1)
+echo "  Size: ${zip_size} MB"
+echo ""
+echo "To enable visualizations in Jukebox:"
+echo "  1. Unzip the archive into your Jukebox build output directory"
+echo "     (next to Jukebox.exe). The result is:"
+echo "         lib/                          (wrapper + native runtimes)"
+echo "         ProjectM/                     (preset data)"
+echo "  2. Also drop Jukebox's own native runtimes (bass.dll, libmpv-2.dll"
+echo "     or libbass.so, libmpv.so.2) into the same lib/ folder."
+echo "  3. Restart Jukebox. The visualizer button appears in the transport"
+echo "     bar automatically."
+echo ""
+
+exit 0

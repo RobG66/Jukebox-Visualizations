@@ -12,6 +12,22 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!--
+      Native runtime libraries (libprojectM, glew) live under `lib/` — flat,
+      Windows .dll and Linux .so coexist by extension. The loader code
+      (Native/ProjectMNative.cs) picks the right filename per OS at runtime.
+
+      The `lib/` folder is NOT shipped in this repo — it's a drop-in
+      location populated by a separate setup script. The Condition guard
+      ensures the build succeeds even when lib/ is empty.
+
+      ProjectM preset data (Presets/, textures/) is shipped separately
+      via the ProjectM/ folder; this content is not native code.
+    -->
+    <Content Include="lib\**\*" Condition="Exists('lib\')">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+
     <Content Include="ProjectM\**\*">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>

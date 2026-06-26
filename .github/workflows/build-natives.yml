@@ -1,0 +1,329 @@
+# .github/workflows/build-natives.yml
+#
+# Builds libprojectM from upstream source on Windows x64 and Linux x64,
+# stages the binaries + their LICENSE files, and publishes them to a
+# GitHub release. The Jukebox's fetch-natives.ps1 / fetch-natives.sh
+# scripts then download from this release by URL + SHA-256.
+#
+# ── Why this exists ──────────────────────────────────────────────────
+# libprojectM is LGPL v2.1+. Distributing an LGPL binary carries
+# obligations: include the LICENSE, make the corresponding source
+# available, and let users replace the library. Building from source in
+# CI — with the upstream commit hash recorded in this workflow file —
+# satisfies all three: the build is reproducible, the LICENSE file
+# travels with the binary, and Jukebox loads the library dynamically
+# (so users can swap it).
+#
+# ── When this runs ───────────────────────────────────────────────────
+# Trigger options (pick what you need):
+#   1. workflow_dispatch  — manual trigger from the GitHub Actions UI.
+#      Use this for the first run and for one-off rebuilds.
+#   2. push tags matching 'natives-v*' — automatic on tag push.
+#      Use this for versioned releases: `git tag natives-v1.0.0 && git
+#      push origin natives-v1.0.0` triggers a build, and the release is
+#      created with that tag name.
+#
+# ── How to use the output ────────────────────────────────────────────
+# After this workflow runs successfully:
+#   1. Go to the Jukebox-Visualizations repo's Releases page on GitHub.
+#   2. You'll find natives-win-x64.zip, natives-linux-x64.tar.gz, and
+#      checksums.sha256 attached to the release.
+#   3. Compute the SHA-256 of each archive (or read it from
+#      checksums.sha256).
+#   4. Update natives.json in BOTH the Jukebox-Visualizations repo and
+#      the Jukebox repo with the new URLs + SHA-256s.
+#   5. Commit and push the manifest updates.
+#
+# ── Updating the libprojectM version ─────────────────────────────────
+# To build a newer version of libprojectM:
+#   1. Edit PROJECTM_REF below to point at the new upstream tag, branch,
+#      or commit hash (e.g. 'v4.1.0' or a specific commit SHA).
+#   2. Commit and push this workflow file.
+#   3. Trigger the workflow manually (workflow_dispatch) or push a new
+#      natives-v* tag.
+#   4. Update natives.json with the new SHA-256s.
+#
+
+name: Build native dependencies
+
+on:
+  # Manual trigger from the Actions UI — useful for the first run and
+  # for one-off rebuilds that aren't tied to a tag.
+  workflow_dispatch:
+
+  # Automatic trigger when a tag matching 'natives-v*' is pushed.
+  # Example: `git tag natives-v1.0.0 && git push origin natives-v1.0.0`
+  push:
+    tags:
+      - 'natives-v*'
+
+# ── Configuration variables ──────────────────────────────────────────
+# PROJECTM_REF is the upstream projectM source ref to build from. Pin
+# it to a specific tag or commit for reproducibility. Bump this when
+# you want to build a newer version of libprojectM.
+env:
+  PROJECTM_REF: 'v4.1.0'  # https://github.com/projectM-visualizer/projectm/tags
+  PROJECTM_REPO: 'https://github.com/projectM-visualizer/projectm.git'
+
+# ── Permissions ──────────────────────────────────────────────────────
+# The publish job needs `contents: write` to create a GitHub release
+# and upload assets. The build jobs need nothing special.
+permissions:
+  contents: write
+
+jobs:
+  # ──────────────────────────────────────────────────────────────────
+  # Windows x64 build
+  # ──────────────────────────────────────────────────────────────────
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout Jukebox-Visualizations
+        uses: actions/checkout@v4
+
+      - name: Set up MSVC dev environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Install CMake
+        uses: lukka/get-cmake@latest
+
+      - name: Checkout projectM source
+        run: |
+          git clone --depth 1 --branch ${{ env.PROJECTM_REF }} ${{ env.PROJECTM_REPO }} projectm
+          # Record the exact commit we built from — goes into the release notes.
+          cd projectm
+          echo "PROJECTM_COMMIT=$(git rev-parse HEAD)" >> $GITHUB_ENV
+          cd ..
+
+      - name: Install GLEW (Windows dependency of libprojectM)
+        run: |
+          # GLEW is needed to build libprojectM on Windows. We use
+          # vcpkg, which is pre-installed on windows-latest runners.
+          vcpkg install glew:x64-windows
+
+      - name: Configure libprojectM build (CMake)
+        run: |
+          cmake -S projectm -B projectm/build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -G "Ninja" \
+            -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake \
+            -DPROJECTM_NATIVE_ARCH=ON
+
+      - name: Build libprojectM
+        run: cmake --build projectm/build --config Release --parallel
+
+      - name: Stage artifacts
+        shell: pwsh
+        run: |
+          $stage = "staging"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+
+          # The libprojectM.dll build output is typically at
+          # projectm/build/Debug/ or projectm/build/Release/ depending
+          # on the generator. Search for it defensively.
+          $dll = Get-ChildItem -Path "projectm/build" -Recurse -Filter "libprojectM.dll" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $dll) {
+            throw "libprojectM.dll not found in build output"
+          }
+          Copy-Item $dll.FullName -Destination "$stage/libprojectM.dll"
+
+          # GLEW runtime — vcpkg installs the binary; copy it next to
+          # libprojectM.dll so the dynamic linker finds it at runtime.
+          $glew = Get-ChildItem -Path "$env:VCPKG_ROOT/installed/x64-windows/bin" -Filter "glew32.dll" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($glew) {
+            Copy-Item $glew.FullName -Destination "$stage/glew32.dll"
+          } else {
+            Write-Host "WARNING: glew32.dll not found in vcpkg install — libprojectM may not load at runtime." -ForegroundColor Yellow
+          }
+
+          # LICENSE files — required for LGPL redistribution.
+          Copy-Item "projectm/LICENSE" -Destination "$stage/libprojectM-LICENSE.txt" -ErrorAction SilentlyContinue
+          Copy-Item "projectm/COPYING" -Destination "$stage/libprojectM-LICENSE.txt" -ErrorAction SilentlyContinue
+
+          # GLEW LICENSE
+          $glewLicense = Get-ChildItem -Path "$env:VCPKG_ROOT/installed/x64-windows/share/glew" -Filter "LICENSE*" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($glewLicense) {
+            Copy-Item $glewLicense.FullName -Destination "$stage/glew-LICENSE.txt"
+          }
+
+          # Build info — records what was built, from what source, when.
+          @"
+          libprojectM Windows x64 build
+          =============================
+          ProjectM source: ${{ env.PROJECTM_REPO }}
+          ProjectM ref:    ${{ env.PROJECTM_REF }}
+          ProjectM commit: ${{ env.PROJECTM_COMMIT }}
+          Built:           $(Get-Date -Format 'o')
+          Runner:          ${{ runner.os }} ${{ runner.arch }}
+          Workflow:        ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+          Contents:
+          - libprojectM.dll  — LGPL v2.1+ (see libprojectM-LICENSE.txt)
+          - glew32.dll       — BSD 3-Clause / MIT (see glew-LICENSE.txt)
+          "@ | Out-File -FilePath "$stage/BUILD-INFO.txt" -Encoding utf8
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: natives-win-x64
+          path: staging/
+          if-no-files-found: error
+
+  # ──────────────────────────────────────────────────────────────────
+  # Linux x64 build
+  # ──────────────────────────────────────────────────────────────────
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Jukebox-Visualizations
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            cmake \
+            ninja-build \
+            libglew-dev \
+            libgl1-mesa-dev \
+            libegl1-mesa-dev \
+            libglm-dev
+
+      - name: Checkout projectM source
+        run: |
+          git clone --depth 1 --branch ${{ env.PROJECTM_REF }} ${{ env.PROJECTM_REPO }} projectm
+          cd projectm
+          echo "PROJECTM_COMMIT=$(git rev-parse HEAD)" >> $GITHUB_ENV
+          cd ..
+
+      - name: Configure libprojectM build (CMake)
+        run: |
+          cmake -S projectm -B projectm/build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -G "Ninja" \
+            -DPROJECTM_NATIVE_ARCH=ON
+
+      - name: Build libprojectM
+        run: cmake --build projectm/build --config Release --parallel
+
+      - name: Stage artifacts
+        run: |
+          stage="staging"
+          mkdir -p "$stage"
+
+          # The .so file may be named libprojectM.so.4.1.0 with symlinks
+          # libprojectM.so.4 and libprojectM.so pointing at it. We want
+          # the actual file (not the symlink), renamed to libprojectM.so.4
+          # so JukeboxVisualizations can load it by that name.
+          so_file=$(find projectm/build -name 'libprojectM.so*' -type f | head -n 1)
+          if [ -z "$so_file" ]; then
+            echo "ERROR: libprojectM.so not found in build output" >&2
+            exit 1
+          fi
+          cp "$so_file" "$stage/libprojectM.so.4"
+
+          # LICENSE — required for LGPL redistribution.
+          cp projectm/LICENSE "$stage/libprojectM-LICENSE.txt" 2>/dev/null || \
+            cp projectm/COPYING "$stage/libprojectM-LICENSE.txt" 2>/dev/null || \
+            echo "WARNING: projectM LICENSE file not found" >&2
+
+          # Build info — records what was built, from what source, when.
+          cat > "$stage/BUILD-INFO.txt" <<EOF
+          libprojectM Linux x64 build
+          ===========================
+          ProjectM source: ${{ env.PROJECTM_REPO }}
+          ProjectM ref:    ${{ env.PROJECTM_REF }}
+          ProjectM commit: ${{ env.PROJECTM_COMMIT }}
+          Built:           $(date -u +%Y-%m-%dT%H:%M:%SZ)
+          Runner:          ${{ runner.os }} ${{ runner.arch }}
+          Workflow:        ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+          Contents:
+          - libprojectM.so.4  — LGPL v2.1+ (see libprojectM-LICENSE.txt)
+          EOF
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: natives-linux-x64
+          path: staging/
+          if-no-files-found: error
+
+  # ──────────────────────────────────────────────────────────────────
+  # Publish: zip the per-platform artifacts, compute checksums, and
+  # upload to a GitHub release.
+  # ──────────────────────────────────────────────────────────────────
+  publish:
+    needs: [build-windows, build-linux]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: List downloaded artifacts
+        run: |
+          find artifacts/ -type f -print | sort
+
+      - name: Create per-platform archives
+        run: |
+          # Windows: zip (PowerShell-friendly extraction)
+          cd artifacts/natives-win-x64
+          zip -r "$GITHUB_WORKSPACE/libprojectM-win-x64.zip" .
+          cd "$GITHUB_WORKSPACE"
+
+          # Linux: tar.gz (preserves permissions, standard on Linux)
+          cd artifacts/natives-linux-x64
+          tar -czf "$GITHUB_WORKSPACE/libprojectM-linux-x64.tar.gz" .
+          cd "$GITHUB_WORKSPACE"
+
+      - name: Compute SHA-256 checksums
+        run: |
+          sha256sum libprojectM-win-x64.zip libprojectM-linux-x64.tar.gz > checksums.sha256
+          echo ""
+          echo "Checksums:"
+          cat checksums.sha256
+
+      - name: Create / update GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          # The release tag is the git tag that triggered the workflow
+          # (for tag pushes) or 'natives-latest' (for manual triggers).
+          # If you'd prefer manual triggers to NOT auto-publish, remove
+          # the second value below so manual triggers only build (the
+          # artifacts are still available in the Actions UI).
+          tag_name: ${{ github.ref_name || 'natives-latest' }}
+          name: Native dependencies ${{ github.ref_name || 'latest' }}
+          body: |
+            # Native dependencies for Jukebox-Visualizations
+
+            Built from upstream projectM source by the `build-natives.yml` CI workflow.
+
+            **ProjectM source:** ${{ env.PROJECTM_REPO }}
+            **ProjectM ref:** ${{ env.PROJECTM_REF }}
+
+            ## Contents
+
+            - `libprojectM-win-x64.zip` — contains `libprojectM.dll`, `glew32.dll`, LICENSE files
+            - `libprojectM-linux-x64.tar.gz` — contains `libprojectM.so.4`, LICENSE files
+            - `checksums.sha256` — SHA-256 of each archive
+
+            ## Licensing
+
+            - `libprojectM` is distributed under **LGPL v2.1+**. See `libprojectM-LICENSE.txt` inside each archive.
+            - `glew32.dll` is distributed under **BSD 3-Clause / MIT**. See `glew-LICENSE.txt` inside the Windows archive.
+
+            See `THIRD_PARTY_LICENSES.md` in the repository for details.
+
+            ## How to use
+
+            Update `natives.json` in both the Jukebox-Visualizations and Jukebox repos with the URLs and SHA-256s from `checksums.sha256`, then commit and push.
+          files: |
+            libprojectM-win-x64.zip
+            libprojectM-linux-x64.tar.gz
+            checksums.sha256
+          fail_on_unmatched_files: true

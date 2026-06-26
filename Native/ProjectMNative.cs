@@ -22,6 +22,7 @@ public static class ProjectMNative
             if (File.Exists(libraryPath))
             {
                 // Crucial: we MUST tell the loader to look in the same directory as the DLL for dependencies!
+                // (e.g. libprojectM.dll needs glew32.dll on Windows — both sit in lib/ together.)
                 _libraryHandle = NativeLibrary.Load(libraryPath, typeof(ProjectMNative).Assembly, DllImportSearchPath.UseDllDirectoryForDependencies | DllImportSearchPath.SafeDirectories);
                 LoadDelegates();
             }
@@ -32,23 +33,26 @@ public static class ProjectMNative
         }
     }
 
+    /// <summary>
+    /// Resolves the path to the native libprojectM binary.
+    ///
+    /// <para>
+    /// Loaded from <c>&lt;appdir&gt;/lib/</c> — flat layout, no per-platform
+    /// subfolders. Windows <c>.dll</c> and Linux <c>.so</c> files coexist by
+    /// extension; we pick the right filename per OS at runtime.
+    /// </para>
+    /// </summary>
     private static string GetLibraryPath()
     {
-        var dir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ProjectM");
-        
-        string ridOS = RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "win" :
-                       RuntimeInformation.IsOSPlatform(OSPlatform.OSX) ? "osx" : "linux";
-                       
-        string ridArch = RuntimeInformation.ProcessArchitecture == Architecture.Arm64 ? "arm64" : "x64";
-        
-        string fileName = ridOS switch
-        {
-            "win" => "libprojectM.dll",
-            "osx" => "libprojectM.dylib",
-            _ => "libprojectM.so.4"
-        };
+        var dir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "lib");
 
-        return Path.Combine(dir, $"{ridOS}-{ridArch}", fileName);
+        string fileName = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+            ? "libprojectM.dll"
+            : RuntimeInformation.IsOSPlatform(OSPlatform.OSX)
+                ? "libprojectM.dylib"
+                : "libprojectM.so.4";
+
+        return Path.Combine(dir, fileName);
     }
 
     private static T GetDelegate<T>(string name, bool throwOnError = true) where T : Delegate
@@ -102,8 +106,8 @@ public static class ProjectMNative
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     public delegate void projectm_set_texture_search_paths_delegate(
-        IntPtr handle, 
-        IntPtr[] paths, 
+        IntPtr handle,
+        IntPtr[] paths,
         nuint count);
     public static projectm_set_texture_search_paths_delegate projectm_set_texture_search_paths { get; private set; } = null!;
 
