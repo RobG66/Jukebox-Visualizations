@@ -169,13 +169,15 @@ jobs:
           $stage = "staging"
           New-Item -ItemType Directory -Force -Path $stage | Out-Null
 
-          # The libprojectM.dll build output is typically at
-          # projectm-src/build/Debug/ or projectm-src/build/Release/
-          # depending on the generator. projectM 4.x may also name the
-          # library with a -4 suffix (libprojectM-4.dll). Search for
-          # both patterns defensively.
-          $dll = Get-ChildItem -Path "${{ env.PROJECTM_SRC_DIR }}/build" -Recurse -Filter "libprojectM*.dll" -ErrorAction SilentlyContinue |
-                 Where-Object { $_.Name -match '^libprojectM(-4)?\.dll$' } |
+          # projectM 4.x on Windows produces `projectM-4.dll` (no "lib"
+          # prefix — Windows DLL convention). Older versions or different
+          # build configs may produce `libprojectM.dll` or
+          # `libprojectM-4.dll`. Match all three patterns defensively.
+          # The Jukebox's ProjectMNative.cs loader looks for
+          # "libprojectM.dll", so we copy whatever we find and rename it
+          # to that.
+          $dll = Get-ChildItem -Path "${{ env.PROJECTM_SRC_DIR }}/build" -Recurse -Filter "*.dll" -ErrorAction SilentlyContinue |
+                 Where-Object { $_.Name -match '^(lib)?projectM(-4)?\.dll$' } |
                  Select-Object -First 1
           if (-not $dll) {
             # Diagnostic: list everything in the build tree so we can see
@@ -187,25 +189,41 @@ jobs:
               ForEach-Object { Write-Host "  $($_.FullName)" }
             throw "libprojectM.dll not found in build output"
           }
+          Write-Host "Found projectM DLL: $($dll.FullName)"
           Copy-Item $dll.FullName -Destination "$stage/libprojectM.dll"
 
-          # GLEW runtime — vcpkg installs the binary; copy it next to
-          # libprojectM.dll so the dynamic linker finds it at runtime.
-          $glew = Get-ChildItem -Path "$env:VCPKG_ROOT/installed/x64-windows/bin" -Filter "glew32.dll" -ErrorAction SilentlyContinue | Select-Object -First 1
+          # GLEW runtime — the projectM build copies glew32.dll into the
+          # same Release/ folder as the projectM DLL. Grab it from there
+          # (more reliable than fishing in vcpkg's install tree). Fall
+          # back to vcpkg's installed/bin if not found next to the DLL.
+          $glew = Get-ChildItem -Path (Split-Path $dll.FullName -Parent) -Filter "glew32.dll" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $glew) {
+            $glew = Get-ChildItem -Path "$env:VCPKG_ROOT/installed/x64-windows/bin" -Filter "glew32.dll" -ErrorAction SilentlyContinue | Select-Object -First 1
+          }
           if ($glew) {
+            Write-Host "Found GLEW DLL: $($glew.FullName)"
             Copy-Item $glew.FullName -Destination "$stage/glew32.dll"
           } else {
-            Write-Host "WARNING: glew32.dll not found in vcpkg install — libprojectM may not load at runtime." -ForegroundColor Yellow
+            Write-Host "WARNING: glew32.dll not found — libprojectM may not load at runtime." -ForegroundColor Yellow
           }
 
           # LICENSE files — required for LGPL redistribution.
           Copy-Item "${{ env.PROJECTM_SRC_DIR }}/LICENSE" -Destination "$stage/libprojectM-LICENSE.txt" -ErrorAction SilentlyContinue
           Copy-Item "${{ env.PROJECTM_SRC_DIR }}/COPYING" -Destination "$stage/libprojectM-LICENSE.txt" -ErrorAction SilentlyContinue
 
-          # GLEW LICENSE
+          # GLEW LICENSE — search vcpkg's installed tree for it. This is
+          # best-effort; if not found, the GLEW license is BSD/MIT and
+          # available at https://github.com/nigels-com/glew/blob/master/LICENSE.txt
           $glewLicense = Get-ChildItem -Path "$env:VCPKG_ROOT/installed/x64-windows/share/glew" -Filter "LICENSE*" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $glewLicense) {
+            $glewLicense = Get-ChildItem -Path "$env:VCPKG_ROOT/installed" -Recurse -Filter "LICENSE*" -ErrorAction SilentlyContinue |
+                            Where-Object { $_.FullName -match 'glew' } |
+                            Select-Object -First 1
+          }
           if ($glewLicense) {
             Copy-Item $glewLicense.FullName -Destination "$stage/glew-LICENSE.txt"
+          } else {
+            Write-Host "WARNING: GLEW LICENSE file not found — see https://github.com/nigels-com/glew/blob/master/LICENSE.txt" -ForegroundColor Yellow
           }
 
           # Build info — records what was built, from what source, when.
