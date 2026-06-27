@@ -85,6 +85,32 @@ jobs:
       - name: Checkout Jukebox-Visualizations
         uses: actions/checkout@v4
 
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Build JukeboxVisualizations.dll (managed wrapper)
+        shell: bash
+        run: |
+          # Build the managed wrapper. The DLL is pure IL — identical for
+          # every platform — but we use the win-x64 RID so the .deps.json
+          # has the right runtime fallbacks configured.
+          dotnet publish JukeboxVisualizations.csproj \
+            -c Release \
+            -r win-x64 \
+            --self-contained false \
+            -o ./wrapper-output \
+            -p:DebugType=None \
+            -p:DebugSymbols=false
+
+          # Verify the wrapper was built.
+          if [ ! -f "./wrapper-output/JukeboxVisualizations.dll" ]; then
+            echo "ERROR: JukeboxVisualizations.dll not found in publish output" >&2
+            exit 1
+          fi
+          echo "Built JukeboxVisualizations.dll successfully."
+
       - name: Set up MSVC dev environment
         uses: ilammy/msvc-dev-cmd@v1
         with:
@@ -169,6 +195,24 @@ jobs:
           $stage = "staging"
           New-Item -ItemType Directory -Force -Path $stage | Out-Null
 
+          # ── Managed wrapper (JukeboxVisualizations.dll) ──
+          # Built earlier via `dotnet publish` into ./wrapper-output/.
+          # The wrapper is pure managed IL — same DLL on every platform.
+          # Lives in lib/ alongside the native libprojectM binary.
+          $wrapper = "./wrapper-output/JukeboxVisualizations.dll"
+          if (Test-Path $wrapper) {
+            Copy-Item $wrapper -Destination "$stage/JukeboxVisualizations.dll"
+            Write-Host "Staged: JukeboxVisualizations.dll"
+          } else {
+            throw "JukeboxVisualizations.dll not found in wrapper-output/"
+          }
+          $depsJson = "./wrapper-output/JukeboxVisualizations.deps.json"
+          if (Test-Path $depsJson) {
+            Copy-Item $depsJson -Destination "$stage/JukeboxVisualizations.deps.json"
+            Write-Host "Staged: JukeboxVisualizations.deps.json"
+          }
+
+          # ── Native: libprojectM.dll ──
           # projectM 4.x on Windows produces `projectM-4.dll` (no "lib"
           # prefix — Windows DLL convention). Older versions or different
           # build configs may produce `libprojectM.dll` or
@@ -228,8 +272,8 @@ jobs:
 
           # Build info — records what was built, from what source, when.
           @"
-          libprojectM Windows x64 build
-          =============================
+          Jukebox-Visualizations Windows x64 build
+          ========================================
           ProjectM source: ${{ env.PROJECTM_REPO }}
           ProjectM ref:    ${{ env.PROJECTM_REF }}
           ProjectM commit: ${{ env.PROJECTM_COMMIT }}
@@ -238,8 +282,10 @@ jobs:
           Workflow:        ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
           Contents:
-          - libprojectM.dll  — LGPL v2.1+ (see libprojectM-LICENSE.txt)
-          - glew32.dll       — BSD 3-Clause / MIT (see glew-LICENSE.txt)
+          - JukeboxVisualizations.dll        — managed wrapper (MIT)
+          - JukeboxVisualizations.deps.json  — dependency manifest
+          - libprojectM.dll                  — LGPL v2.1+ (see libprojectM-LICENSE.txt)
+          - glew32.dll                       — BSD 3-Clause / MIT (see glew-LICENSE.txt)
           "@ | Out-File -FilePath "$stage/BUILD-INFO.txt" -Encoding utf8
 
       - name: Upload build artifact
@@ -257,6 +303,31 @@ jobs:
     steps:
       - name: Checkout Jukebox-Visualizations
         uses: actions/checkout@v4
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Build JukeboxVisualizations.dll (managed wrapper)
+        run: |
+          # Build the managed wrapper. The DLL is pure IL — identical for
+          # every platform — but we use the linux-x64 RID so the .deps.json
+          # has the right runtime fallbacks configured.
+          dotnet publish JukeboxVisualizations.csproj \
+            -c Release \
+            -r linux-x64 \
+            --self-contained false \
+            -o ./wrapper-output \
+            -p:DebugType=None \
+            -p:DebugSymbols=false
+
+          # Verify the wrapper was built.
+          if [ ! -f "./wrapper-output/JukeboxVisualizations.dll" ]; then
+            echo "ERROR: JukeboxVisualizations.dll not found in publish output" >&2
+            exit 1
+          fi
+          echo "Built JukeboxVisualizations.dll successfully."
 
       - name: Install build dependencies
         run: |
@@ -321,6 +392,23 @@ jobs:
           stage="staging"
           mkdir -p "$stage"
 
+          # ── Managed wrapper (JukeboxVisualizations.dll) ──
+          # Built earlier via `dotnet publish` into ./wrapper-output/.
+          # The wrapper is pure managed IL — same DLL on every platform.
+          # Lives in lib/ alongside the native libprojectM binary.
+          if [ -f "./wrapper-output/JukeboxVisualizations.dll" ]; then
+            cp "./wrapper-output/JukeboxVisualizations.dll" "$stage/"
+            echo "Staged: JukeboxVisualizations.dll"
+          else
+            echo "ERROR: JukeboxVisualizations.dll not found in wrapper-output/" >&2
+            exit 1
+          fi
+          if [ -f "./wrapper-output/JukeboxVisualizations.deps.json" ]; then
+            cp "./wrapper-output/JukeboxVisualizations.deps.json" "$stage/"
+            echo "Staged: JukeboxVisualizations.deps.json"
+          fi
+
+          # ── Native: libprojectM.so.4 ──
           # projectM 4.x names the shared library with the major version
           # baked into the base name, e.g. `libprojectM-4.so.4.1.6` (note
           # the `-4` before `.so`). The Jukebox's ProjectMNative.cs loader
@@ -356,8 +444,8 @@ jobs:
 
           # Build info — records what was built, from what source, when.
           cat > "$stage/BUILD-INFO.txt" <<EOF
-          libprojectM Linux x64 build
-          ===========================
+          Jukebox-Visualizations Linux x64 build
+          ======================================
           ProjectM source: ${{ env.PROJECTM_REPO }}
           ProjectM ref:    ${{ env.PROJECTM_REF }}
           ProjectM commit: ${{ env.PROJECTM_COMMIT }}
@@ -366,7 +454,9 @@ jobs:
           Workflow:        ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
           Contents:
-          - libprojectM.so.4  — LGPL v2.1+ (see libprojectM-LICENSE.txt)
+          - JukeboxVisualizations.dll        — managed wrapper (MIT)
+          - JukeboxVisualizations.deps.json  — dependency manifest
+          - libprojectM.so.4                 — LGPL v2.1+ (see libprojectM-LICENSE.txt)
           EOF
 
       - name: Upload build artifact
@@ -397,17 +487,17 @@ jobs:
         run: |
           # Windows: zip (PowerShell-friendly extraction)
           cd artifacts/natives-win-x64
-          zip -r "$GITHUB_WORKSPACE/libprojectM-win-x64.zip" .
+          zip -r "$GITHUB_WORKSPACE/Jukebox-Visualizations-win-x64.zip" .
           cd "$GITHUB_WORKSPACE"
 
           # Linux: tar.gz (preserves permissions, standard on Linux)
           cd artifacts/natives-linux-x64
-          tar -czf "$GITHUB_WORKSPACE/libprojectM-linux-x64.tar.gz" .
+          tar -czf "$GITHUB_WORKSPACE/Jukebox-Visualizations-linux-x64.tar.gz" .
           cd "$GITHUB_WORKSPACE"
 
       - name: Compute SHA-256 checksums
         run: |
-          sha256sum libprojectM-win-x64.zip libprojectM-linux-x64.tar.gz > checksums.sha256
+          sha256sum Jukebox-Visualizations-win-x64.zip Jukebox-Visualizations-linux-x64.tar.gz > checksums.sha256
           echo ""
           echo "Checksums:"
           cat checksums.sha256
@@ -415,64 +505,47 @@ jobs:
       - name: Create / update GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          # The release tag is the git tag that triggered the workflow
-          # (for tag pushes) or 'natives-latest' (for manual triggers).
-          # If you'd prefer manual triggers to NOT auto-publish, remove
-          # the second value below so manual triggers only build (the
-          # artifacts are still available in the Actions UI).
           tag_name: ${{ github.ref_name || 'natives-latest' }}
-          name: Native dependencies ${{ github.ref_name || 'latest' }}
+          name: Jukebox-Visualizations ${{ github.ref_name || 'latest' }}
           body: |
-            # Native dependencies for Jukebox-Visualizations
+            # Jukebox-Visualizations drop-in package
 
-            Built from upstream projectM source by the `build-natives.yml` CI workflow.
+            Built from upstream projectM source + the Jukebox-Visualizations managed wrapper by the `build-natives.yml` CI workflow.
 
             **ProjectM source:** ${{ env.PROJECTM_REPO }}
             **ProjectM ref:** ${{ env.PROJECTM_REF }}
 
             ## Contents
 
-            - `libprojectM-win-x64.zip` — contains `libprojectM.dll`, `glew32.dll`, LICENSE files
-            - `libprojectM-linux-x64.tar.gz` — contains `libprojectM.so.4`, LICENSE files
+            Each archive contains a complete drop-in for the Jukebox's `lib/` folder:
+
+            - `Jukebox-Visualizations-win-x64.zip` — contains `JukeboxVisualizations.dll`, `JukeboxVisualizations.deps.json`, `libprojectM.dll`, `glew32.dll`, LICENSE files, BUILD-INFO.txt
+            - `Jukebox-Visualizations-linux-x64.tar.gz` — contains `JukeboxVisualizations.dll`, `JukeboxVisualizations.deps.json`, `libprojectM.so.4`, LICENSE files, BUILD-INFO.txt
             - `checksums.sha256` — SHA-256 of each archive (for verification)
+
+            ## How to use
+
+            1. Download the archive for your platform.
+            2. Extract the contents into your Jukebox build output `lib/` folder
+               (next to `Jukebox.exe`). The archive extracts flat — all files
+               go directly into `lib/`.
+            3. Also ensure the `ProjectM/` preset folder (containing `presets/`
+               and `textures/`) is in the Jukebox build output directory. If
+               you don't have it, build the Jukebox-Visualizations repo with
+               `build.ps1` / `build.sh` — that script stages the preset data
+               alongside the binaries.
+            4. Restart Jukebox. The visualizer button appears in the transport
+               bar automatically.
 
             ## Licensing
 
-            - `libprojectM` is distributed under **LGPL v2.1+**. See `libprojectM-LICENSE.txt` inside each archive.
-            - `glew32.dll` is distributed under **BSD 3-Clause / MIT**. See `glew-LICENSE.txt` inside the Windows archive.
+            - `JukeboxVisualizations.dll` — MIT (the managed wrapper)
+            - `libprojectM.dll` / `libprojectM.so.4` — **LGPL v2.1+** (see `libprojectM-LICENSE.txt` inside each archive)
+            - `glew32.dll` — **BSD 3-Clause / MIT** (see `glew-LICENSE.txt` inside the Windows archive)
 
             See `THIRD_PARTY_LICENSES.md` in the repository for details.
-
-            ## How to use these binaries
-
-            These binaries go into the `lib/` folder of the Jukebox-Visualizations
-            repo, then get bundled into the drop-in zip by `build.ps1` / `build.sh`.
-
-            ### For Jukebox-Visualizations developers (building the drop-in zip)
-
-            1. Download the asset for your platform:
-               - Windows: `libprojectM-win-x64.zip`
-               - Linux:   `libprojectM-linux-x64.tar.gz`
-            2. Extract into the `lib/` folder at the root of your local
-               Jukebox-Visualizations repo. The archive extracts flat —
-               `lib/libprojectM.dll`, `lib/glew32.dll`, `lib/libprojectM-LICENSE.txt`, etc.
-            3. Run `build.ps1` (Windows) or `build.sh` (Linux/macOS) to
-               produce `publish/Jukebox-Visualizations-dropin.zip`.
-            4. The drop-in zip is what end users drop into their Jukebox
-               build output directory.
-
-            See `lib/README.md` in the repo for more details.
-
-            ### For end users (using the drop-in zip)
-
-            End users don't download from this release directly. Instead,
-            they download `Jukebox-Visualizations-dropin.zip` from the
-            latest release on the Jukebox-Visualizations repo (which is
-            produced by `build.ps1` / `build.sh` and includes both the
-            managed wrapper and these native binaries in a single `lib/`
-            folder, plus the preset data in a `ProjectM/` folder).
           files: |
-            libprojectM-win-x64.zip
-            libprojectM-linux-x64.tar.gz
+            Jukebox-Visualizations-win-x64.zip
+            Jukebox-Visualizations-linux-x64.tar.gz
             checksums.sha256
           fail_on_unmatched_files: true
