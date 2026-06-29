@@ -119,7 +119,7 @@ Write-Host ""
 
 if (-not $winSuccess -or -not $linuxSuccess) {
     Write-Host "================================" -ForegroundColor Red
-    Write-Host "Build FAILED — staging skipped." -ForegroundColor Red
+    Write-Host "Build FAILED - staging skipped." -ForegroundColor Red
     if (-not $winSuccess)   { Write-Host "  Windows x64 : FAILED" -ForegroundColor Red }
     if (-not $linuxSuccess) { Write-Host "  Linux x64   : FAILED" -ForegroundColor Red }
     exit 1
