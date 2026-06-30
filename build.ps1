@@ -47,13 +47,7 @@ if (-not (Test-Path "JukeboxVisualizations.csproj")) {
     exit 1
 }
 
-$sourceProjectM = ".\ProjectM"
-if (-not (Test-Path $sourceProjectM)) {
-    Write-Host "ERROR: Source 'ProjectM' folder not found at $sourceProjectM" -ForegroundColor Red
-    Write-Host "       The ProjectM folder (containing presets/) must be present" -ForegroundColor Red
-    Write-Host "       in the project root before building." -ForegroundColor Red
-    exit 1
-}
+
 
 $sourceLib = ".\lib"
 
@@ -79,10 +73,8 @@ if (-not $libPopulated) {
 # ── Clean previous builds ───────────────────────────────────────────────
 Write-Host "Cleaning previous builds..." -ForegroundColor Yellow
 dotnet clean "JukeboxVisualizations.csproj" --configuration Release 2>$null | Out-Null
-foreach ($dir in @("./publish/win-x64", "./publish/linux-x64", "./publish/stage")) {
-    if (Test-Path $dir) {
-        Remove-Item -Recurse -Force $dir
-    }
+if (Test-Path "./publish") {
+    Remove-Item -Recurse -Force "./publish"
 }
 New-Item -ItemType Directory -Force -Path "./publish/stage" | Out-Null
 Write-Host ""
@@ -159,19 +151,7 @@ foreach ($file in @(
     }
 }
 
-# 3) ProjectM preset data (presets/, textures/, and anything else under
-#    the source ProjectM/ folder except native subfolders).
-foreach ($entry in Get-ChildItem $sourceProjectM -Force) {
-    if ($entry.Name -in @("win-x64", "linux-x64", "osx-arm64", "osx-x64")) {
-        continue
-    }
-    $dstProjectM = Join-Path $dest "ProjectM"
-    if (-not (Test-Path $dstProjectM)) {
-        New-Item -ItemType Directory -Force -Path $dstProjectM | Out-Null
-    }
-    Copy-Item $entry.FullName -Destination $dstProjectM -Recurse -Force
-    Write-Host "  Copied: ProjectM/$($entry.Name)" -ForegroundColor Gray
-}
+# 3) ProjectM preset data copy has been disabled to prevent long build times and large ZIP sizes.
 
 Write-Host ""
 
@@ -206,7 +186,6 @@ Write-Host "To enable visualizations in Jukebox:" -ForegroundColor Yellow
 Write-Host "  1. Unzip the archive into your Jukebox build output directory" -ForegroundColor Yellow
 Write-Host "     (next to Jukebox.exe). The result is:" -ForegroundColor Yellow
 Write-Host "         lib/                          (wrapper + native runtimes)" -ForegroundColor Yellow
-Write-Host "         ProjectM/                     (preset data)" -ForegroundColor Yellow
 Write-Host "  2. Also drop Jukebox's own native runtimes (bass.dll, libmpv-2.dll" -ForegroundColor Yellow
 Write-Host "     or libbass.so, libmpv.so.2) into the same lib/ folder." -ForegroundColor Yellow
 Write-Host "  3. Restart Jukebox. The visualizer button appears in the transport" -ForegroundColor Yellow

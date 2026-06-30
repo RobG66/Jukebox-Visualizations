@@ -13,6 +13,7 @@ public enum ProjectMChannels
 public static class ProjectMNative
 {
     private static IntPtr _libraryHandle = IntPtr.Zero;
+    private static IntPtr _glewHandle = IntPtr.Zero;
 
     static ProjectMNative()
     {
@@ -21,6 +22,33 @@ public static class ProjectMNative
             string libraryPath = GetLibraryPath();
             if (File.Exists(libraryPath))
             {
+                if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+                {
+                    string dir = Path.GetDirectoryName(libraryPath) ?? "";
+                    string glewPath = Path.Combine(dir, "glew32.dll");
+                    if (File.Exists(glewPath))
+                    {
+                        try
+                        {
+                            _glewHandle = NativeLibrary.Load(glewPath, typeof(ProjectMNative).Assembly, DllImportSearchPath.SafeDirectories);
+                            if (NativeLibrary.TryGetExport(_glewHandle, "glewExperimental", out IntPtr glewExpAddr))
+                            {
+                                Marshal.WriteByte(glewExpAddr, 1);
+                                Console.WriteLine("[ProjectM] Set glewExperimental = true successfully.");
+                            }
+                            if (NativeLibrary.TryGetExport(_glewHandle, "glewInit", out IntPtr glewInitAddr))
+                            {
+                                glewInit = Marshal.GetDelegateForFunctionPointer<glewInit_delegate>(glewInitAddr);
+                                Console.WriteLine("[ProjectM] Loaded glewInit delegate successfully.");
+                            }
+                        }
+                        catch (Exception glewEx)
+                        {
+                            Console.WriteLine($"[ProjectM] Failed to set glewExperimental: {glewEx.Message}");
+                        }
+                    }
+                }
+
                 // Crucial: we MUST tell the loader to look in the same directory as the DLL for dependencies!
                 // (e.g. libprojectM.dll needs glew32.dll on Windows — both sit in lib/ together.)
                 _libraryHandle = NativeLibrary.Load(libraryPath, typeof(ProjectMNative).Assembly, DllImportSearchPath.UseDllDirectoryForDependencies | DllImportSearchPath.SafeDirectories);
@@ -90,6 +118,7 @@ public static class ProjectMNative
         projectm_set_log_level = GetDelegate<projectm_set_log_level_delegate>("projectm_set_log_level", false);
         projectm_load_preset_file = GetDelegate<projectm_load_preset_file_delegate>("projectm_load_preset_file", false);
         projectm_load_preset_data = GetDelegate<projectm_load_preset_data_delegate>("projectm_load_preset_data", false);
+        projectm_write_debug_image_on_next_frame = GetDelegate<projectm_write_debug_image_on_next_frame_delegate>("projectm_write_debug_image_on_next_frame", false);
     }
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
@@ -112,14 +141,24 @@ public static class ProjectMNative
     public static projectm_set_texture_search_paths_delegate projectm_set_texture_search_paths { get; private set; } = null!;
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    public delegate void projectm_log_callback(IntPtr user_data, int level, [MarshalAs(UnmanagedType.LPUTF8Str)] string message);
+    public delegate int glewInit_delegate();
+    public static glewInit_delegate? glewInit { get; private set; }
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    public delegate void projectm_set_log_callback_delegate(projectm_log_callback callback, IntPtr user_data);
+    public delegate void projectm_log_callback(
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string message,
+        int level,
+        IntPtr user_data);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    public delegate void projectm_set_log_callback_delegate(
+        projectm_log_callback callback,
+        [MarshalAs(UnmanagedType.I1)] bool unused,
+        IntPtr user_data);
     public static projectm_set_log_callback_delegate projectm_set_log_callback { get; private set; } = null!;
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    public delegate void projectm_set_log_level_delegate(int level);
+    public delegate void projectm_set_log_level_delegate(int level, [MarshalAs(UnmanagedType.I1)] bool unused);
     public static projectm_set_log_level_delegate projectm_set_log_level { get; private set; } = null!;
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
@@ -138,11 +177,64 @@ public static class ProjectMNative
     public delegate void projectm_opengl_render_frame_delegate(IntPtr instance);
     public static projectm_opengl_render_frame_delegate projectm_opengl_render_frame { get; private set; } = null!;
 
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
-    public delegate void projectm_load_preset_file_delegate(IntPtr handle, [MarshalAs(UnmanagedType.LPStr)] string filename, byte smooth_transition);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    public delegate int projectm_load_preset_file_delegate(IntPtr handle, [MarshalAs(UnmanagedType.LPUTF8Str)] string filename, [MarshalAs(UnmanagedType.I1)] bool smooth_transition);
     public static projectm_load_preset_file_delegate projectm_load_preset_file { get; private set; } = null!;
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     public delegate void projectm_load_preset_data_delegate(IntPtr handle, IntPtr data, nuint length, byte smooth_transition);
     public static projectm_load_preset_data_delegate projectm_load_preset_data { get; private set; } = null!;
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    public delegate void projectm_write_debug_image_on_next_frame_delegate(IntPtr handle);
+    public static projectm_write_debug_image_on_next_frame_delegate? projectm_write_debug_image_on_next_frame { get; private set; }
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    public delegate void BindFramebufferDelegate(uint target, uint framebuffer);
+
+    public static BindFramebufferDelegate? OriginalBindFramebuffer;
+    private static readonly BindFramebufferDelegate _hookedBindFramebufferDelegate = HookedBindFramebuffer;
+    public static int TargetFbo = 0;
+    private static bool _hooksInstalled = false;
+
+    private static void HookedBindFramebuffer(uint target, uint framebuffer)
+    {
+        if (framebuffer == 0 && TargetFbo != 0)
+        {
+            framebuffer = (uint)TargetFbo;
+        }
+        OriginalBindFramebuffer?.Invoke(target, framebuffer);
+    }
+
+    public static void InstallGlewHooks()
+    {
+        if (_hooksInstalled || _glewHandle == IntPtr.Zero) return;
+        try
+        {
+            if (NativeLibrary.TryGetExport(_glewHandle, "__glewBindFramebuffer", out IntPtr addr))
+            {
+                IntPtr originalFuncPtr = Marshal.ReadIntPtr(addr);
+                if (originalFuncPtr != IntPtr.Zero)
+                {
+                    OriginalBindFramebuffer = Marshal.GetDelegateForFunctionPointer<BindFramebufferDelegate>(originalFuncPtr);
+                    IntPtr hookedFuncPtr = Marshal.GetFunctionPointerForDelegate(_hookedBindFramebufferDelegate);
+                    Marshal.WriteIntPtr(addr, hookedFuncPtr);
+                    Console.WriteLine("[ProjectM] Hooked __glewBindFramebuffer successfully.");
+                    _hooksInstalled = true;
+                }
+                else
+                {
+                    Console.WriteLine("[ProjectM] __glewBindFramebuffer function pointer is currently NULL (glewInit not run yet?)");
+                }
+            }
+            else
+            {
+                Console.WriteLine("[ProjectM] __glewBindFramebuffer export not found in glew32.dll");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[ProjectM] Failed to install GLEW hooks: {ex.Message}");
+        }
+    }
 }

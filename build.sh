@@ -22,13 +22,7 @@ if [[ ! -f "JukeboxVisualizations.csproj" ]]; then
     exit 1
 fi
 
-SOURCE_PROJECTM="./ProjectM"
-if [[ ! -d "$SOURCE_PROJECTM" ]]; then
-    echo "ERROR: Source 'ProjectM' folder not found at $SOURCE_PROJECTM" >&2
-    echo "       The ProjectM folder (containing presets/) must be present" >&2
-    echo "       in the project root before building." >&2
-    exit 1
-fi
+
 
 SOURCE_LIB="./lib"
 
@@ -57,7 +51,7 @@ fi
 # ── Clean previous builds ───────────────────────────────────────────
 echo "Cleaning previous builds..."
 dotnet clean "JukeboxVisualizations.csproj" --configuration Release >/dev/null 2>&1 || true
-rm -rf ./publish/win-x64 ./publish/linux-x64 ./publish/stage
+rm -rf ./publish
 mkdir -p ./publish/stage
 echo ""
 
@@ -123,17 +117,7 @@ for file in JukeboxVisualizations.dll JukeboxVisualizations.deps.json; do
     fi
 done
 
-# 3) ProjectM preset data (presets/, textures/, and anything else under
-#    the source ProjectM/ folder except native subfolders).
-mkdir -p "$DEST/ProjectM"
-for entry in "$SOURCE_PROJECTM"/*; do
-    name="$(basename "$entry")"
-    case "$name" in
-        win-x64|linux-x64|osx-arm64|osx-x64) continue ;;
-    esac
-    cp -r "$entry" "$DEST/ProjectM/"
-    echo "  Copied: ProjectM/$name"
-done
+# 3) ProjectM preset data copy has been disabled to prevent long build times and large ZIP sizes.
 
 echo ""
 
@@ -170,7 +154,6 @@ echo "To enable visualizations in Jukebox:"
 echo "  1. Unzip the archive into your Jukebox build output directory"
 echo "     (next to Jukebox.exe). The result is:"
 echo "         lib/                          (wrapper + native runtimes)"
-echo "         ProjectM/                     (preset data)"
 echo "  2. Also drop Jukebox's own native runtimes (bass.dll, libmpv-2.dll"
 echo "     or libbass.so, libmpv.so.2) into the same lib/ folder."
 echo "  3. Restart Jukebox. The visualizer button appears in the transport"

@@ -34,13 +34,13 @@ public class ProjectMControl : OpenGlControlBase
 
     public ProjectMControl()
     {
-        _logCallback = (IntPtr userData, int level, string message) =>
+        _logCallback = (string message, int level, IntPtr userData) =>
         {
             if (level <= 2) // Warning or Error
             {
                 _lastLog = message;
+                Console.WriteLine($"[ProjectM NATIVE] {message}");
             }
-            Console.WriteLine($"[ProjectM NATIVE] {message}");
         };
     }
 
@@ -70,7 +70,6 @@ public class ProjectMControl : OpenGlControlBase
             var renderScaling = Avalonia.Controls.TopLevel.GetTopLevel(this)?.RenderScaling ?? 1.0;
             int width = (int)Math.Max(1, Bounds.Width * renderScaling);
             int height = (int)Math.Max(1, Bounds.Height * renderScaling);
-
             // Clear to black
             gl.BindFramebuffer(GL_FRAMEBUFFER, fb);
             gl.Viewport(0, 0, width, height);
@@ -89,15 +88,28 @@ public class ProjectMControl : OpenGlControlBase
                 {
                     if (ProjectMNative.projectm_set_log_level != null)
                     {
-                        ProjectMNative.projectm_set_log_level(4); // DEBUG
-                        ProjectMNative.projectm_set_log_callback(_logCallback, IntPtr.Zero);
+                        ProjectMNative.projectm_set_log_level(4, false); // DEBUG
+                        ProjectMNative.projectm_set_log_callback(_logCallback, false, IntPtr.Zero);
                     }
 
+                    if (ProjectMNative.glewInit != null)
+                    {
+                        int glewRes = ProjectMNative.glewInit();
+                        if (glewRes != 0)
+                        {
+                            Console.WriteLine($"[ProjectM] glewInit() failed with code: {glewRes}");
+                        }
+                        ProjectMNative.InstallGlewHooks();
+                    }
+ 
                     if (ProjectMNative.projectm_create != null)
                     {
-                        Console.WriteLine("[ProjectM] Calling projectm_create()...");
                         _projectMHandle = ProjectMNative.projectm_create();
-                        if (_projectMHandle != IntPtr.Zero)
+                        if (_projectMHandle == IntPtr.Zero)
+                        {
+                            Console.WriteLine("[ProjectM] ERROR: projectm_create() returned NULL handle");
+                        }
+                        else
                         {
                             ProjectMNative.projectm_set_fps(_projectMHandle, 60);
                             ProjectMNative.projectm_set_window_size(_projectMHandle, (nuint)Math.Max(1, Bounds.Width), (nuint)Math.Max(1, Bounds.Height));
@@ -142,7 +154,11 @@ public class ProjectMControl : OpenGlControlBase
                     if (ProjectMNative.projectm_load_preset_file != null)
                     {
                         var normalizedPath = presetPath.Replace('\\', '/');
-                        ProjectMNative.projectm_load_preset_file(_projectMHandle, normalizedPath, 0);
+                        int loadRes = ProjectMNative.projectm_load_preset_file(_projectMHandle, normalizedPath, false);
+                        if (loadRes != 1)
+                        {
+                            Console.WriteLine($"[ProjectM] ERROR: projectm_load_preset_file failed (returned {loadRes}) for: {normalizedPath}");
+                        }
                     }
                     else
                     {
@@ -161,7 +177,12 @@ public class ProjectMControl : OpenGlControlBase
                 ProjectMNative.projectm_pcm_add_int16(_projectMHandle, samples, (uint)samples.Length / 2, ProjectMChannels.Stereo);
             }
 
+
+
+            ProjectMNative.TargetFbo = fb;
             ProjectMNative.projectm_opengl_render_frame(_projectMHandle);
+            ProjectMNative.TargetFbo = 0;
+            gl.BindFramebuffer(GL_FRAMEBUFFER, fb);
             
             _frameCount++;
         }
