@@ -11,46 +11,62 @@ namespace JukeboxVisualizations.Controls;
 
 public class ProjectMControl : OpenGlControlBase
 {
+    #region Fields & Constants
     private IntPtr _projectMHandle;
     private readonly ConcurrentQueue<short[]> _pcmQueue = new();
     private readonly ConcurrentQueue<string> _presetQueue = new();
-
-    private long _frameCount = 0;
-    private int _lastWidth = 0;
-    private int _lastHeight = 0;
-
-    public static readonly StyledProperty<string> PresetPathProperty =
-        AvaloniaProperty.Register<ProjectMControl, string>(nameof(PresetPath), "");
-
-    public string PresetPath
-    {
-        get => GetValue(PresetPathProperty);
-        set => SetValue(PresetPathProperty, value);
-    }
-
+    private long _frameCount;
+    private int _lastWidth;
+    private int _lastHeight;
     private string _lastLog = "";
+    private readonly ProjectMNative.projectm_log_callback _logCallback;
+    private bool _engineRequested;
+    #endregion
 
-    private ProjectMNative.projectm_log_callback _logCallback;
+    #region Public Properties
+    public bool IsHandleValid => _projectMHandle != IntPtr.Zero;
+    #endregion
 
+    #region Constructor
     public ProjectMControl()
     {
         _logCallback = (string message, int level, IntPtr userData) =>
         {
-            if (level <= 2) // Warning or Error
+            if (level <= 2)
             {
                 _lastLog = message;
                 Console.WriteLine($"[ProjectM NATIVE] {message}");
             }
         };
     }
+    #endregion
 
-    private bool _engineRequested = false;
-
+    #region Public Methods
     public void StartEngine()
     {
         _engineRequested = true;
     }
 
+    public void FeedPcm(short[] samples)
+    {
+        _pcmQueue.Enqueue(samples);
+        while (_pcmQueue.Count > 10)
+        {
+            _pcmQueue.TryDequeue(out _);
+        }
+    }
+
+    public void LoadPreset(string path, bool smooth = true)
+    {
+        _presetQueue.Enqueue(path);
+        while (_presetQueue.Count > 5)
+        {
+            _presetQueue.TryDequeue(out _);
+        }
+    }
+    #endregion
+
+    #region Protected Methods
     protected override void OnOpenGlInit(GlInterface gl)
     {
         base.OnOpenGlInit(gl);
@@ -60,7 +76,6 @@ public class ProjectMControl : OpenGlControlBase
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
     {
         base.OnPropertyChanged(change);
-        // We handle resizing in OnOpenGlRender now to ensure it happens on the GL thread
     }
 
     protected override void OnOpenGlRender(GlInterface gl, int fb)
@@ -70,7 +85,7 @@ public class ProjectMControl : OpenGlControlBase
             var renderScaling = Avalonia.Controls.TopLevel.GetTopLevel(this)?.RenderScaling ?? 1.0;
             int width = (int)Math.Max(1, Bounds.Width * renderScaling);
             int height = (int)Math.Max(1, Bounds.Height * renderScaling);
-            // Clear to black
+
             gl.BindFramebuffer(GL_FRAMEBUFFER, fb);
             gl.Viewport(0, 0, width, height);
             gl.ClearColor(0.0f, 0.0f, 0.0f, 1.0f);
@@ -82,56 +97,9 @@ public class ProjectMControl : OpenGlControlBase
                 return;
             }
 
-            if (_projectMHandle == IntPtr.Zero) 
+            if (_projectMHandle == IntPtr.Zero)
             {
-                try
-                {
-                    if (ProjectMNative.projectm_set_log_level != null)
-                    {
-                        ProjectMNative.projectm_set_log_level(4, false); // DEBUG
-                        ProjectMNative.projectm_set_log_callback(_logCallback, false, IntPtr.Zero);
-                    }
-
-                    if (ProjectMNative.glewInit != null)
-                    {
-                        int glewRes = ProjectMNative.glewInit();
-                        if (glewRes != 0)
-                        {
-                            Console.WriteLine($"[ProjectM] glewInit() failed with code: {glewRes}");
-                        }
-                        ProjectMNative.InstallGlewHooks();
-                    }
- 
-                    if (ProjectMNative.projectm_create != null)
-                    {
-                        _projectMHandle = ProjectMNative.projectm_create();
-                        if (_projectMHandle == IntPtr.Zero)
-                        {
-                            Console.WriteLine("[ProjectM] ERROR: projectm_create() returned NULL handle");
-                        }
-                        else
-                        {
-                            ProjectMNative.projectm_set_fps(_projectMHandle, 60);
-                            ProjectMNative.projectm_set_window_size(_projectMHandle, (nuint)Math.Max(1, Bounds.Width), (nuint)Math.Max(1, Bounds.Height));
-                            
-                            if (ProjectMNative.projectm_set_texture_search_paths != null)
-                            {
-                                var texturesPath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ProjectM", "textures");
-                                if (System.IO.Directory.Exists(texturesPath))
-                                {
-                                    IntPtr ptr = Marshal.StringToHGlobalAnsi(texturesPath);
-                                    ProjectMNative.projectm_set_texture_search_paths(_projectMHandle, new IntPtr[] { ptr }, 1);
-                                    Marshal.FreeHGlobal(ptr);
-                                }
-                            }
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"ProjectM Init Error: {ex}");
-                }
-
+                InitializeProjectM();
                 if (_projectMHandle == IntPtr.Zero)
                 {
                     RequestNextFrameRendering();
@@ -146,44 +114,33 @@ public class ProjectMControl : OpenGlControlBase
                 ProjectMNative.projectm_set_window_size(_projectMHandle, (nuint)width, (nuint)height);
             }
 
-            // Load any pending presets on the GL thread
             while (_presetQueue.TryDequeue(out var presetPath))
             {
-                if (System.IO.File.Exists(presetPath))
+                if (ProjectMNative.projectm_load_preset_file != null)
                 {
-                    if (ProjectMNative.projectm_load_preset_file != null)
+                    var normalizedPath = presetPath.Replace('\\', '/');
+                    int loadRes = ProjectMNative.projectm_load_preset_file(_projectMHandle, normalizedPath, false);
+                    if (loadRes != 1)
                     {
-                        var normalizedPath = presetPath.Replace('\\', '/');
-                        int loadRes = ProjectMNative.projectm_load_preset_file(_projectMHandle, normalizedPath, false);
-                        if (loadRes != 1)
-                        {
-                            Console.WriteLine($"[ProjectM] ERROR: projectm_load_preset_file failed (returned {loadRes}) for: {normalizedPath}");
-                        }
-                    }
-                    else
-                    {
-                        Console.WriteLine($"[ProjectM] ERROR: load_preset_file delegate is NULL!");
+                        Console.WriteLine($"[ProjectM] ERROR: projectm_load_preset_file failed (returned {loadRes}) for: {normalizedPath}");
                     }
                 }
                 else
                 {
-                    Console.WriteLine($"[ProjectM] PRESET FILE NOT FOUND: {presetPath}");
+                    Console.WriteLine($"[ProjectM] ERROR: load_preset_file delegate is NULL!");
                 }
             }
 
-            // Drain PCM queue and feed to projectM
             while (_pcmQueue.TryDequeue(out var samples))
             {
                 ProjectMNative.projectm_pcm_add_int16(_projectMHandle, samples, (uint)samples.Length / 2, ProjectMChannels.Stereo);
             }
 
-
-
             ProjectMNative.TargetFbo = fb;
             ProjectMNative.projectm_opengl_render_frame(_projectMHandle);
             ProjectMNative.TargetFbo = 0;
             gl.BindFramebuffer(GL_FRAMEBUFFER, fb);
-            
+
             _frameCount++;
         }
         catch (Exception ex)
@@ -203,62 +160,58 @@ public class ProjectMControl : OpenGlControlBase
         }
         base.OnOpenGlDeinit(gl);
     }
+    #endregion
 
-    public void FeedPcm(short[] samples)
-    {
-        _pcmQueue.Enqueue(samples);
-        while (_pcmQueue.Count > 10)
-        {
-            _pcmQueue.TryDequeue(out _);
-        }
-    }
-
-    public void LoadPreset(string path, bool smooth = true)
+    #region Private Methods
+    private void InitializeProjectM()
     {
         try
         {
-            var tempDir = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ProjectM", "temp_preset");
-            System.IO.Directory.CreateDirectory(tempDir);
-            
-            // Clear old temp files
-            foreach (var file in System.IO.Directory.GetFiles(tempDir))
+            if (ProjectMNative.projectm_set_log_level != null)
             {
-                try { System.IO.File.Delete(file); } catch { }
+                ProjectMNative.projectm_set_log_level(4, false);
+                ProjectMNative.projectm_set_log_callback(_logCallback, false, IntPtr.Zero);
             }
 
-            string destPath = System.IO.Path.Combine(tempDir, System.IO.Path.GetFileName(path));
-            System.IO.File.Copy(path, destPath, true);
-
-            // Copy associated textures
-            string sourceDir = System.IO.Path.GetDirectoryName(path) ?? "";
-            string content = System.IO.File.ReadAllText(path);
-            var regex = new System.Text.RegularExpressions.Regex(@"[a-zA-Z0-9_-]+\.(?:jpg|png|bmp|tga)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-            
-            foreach (System.Text.RegularExpressions.Match match in regex.Matches(content))
+            if (ProjectMNative.glewInit != null)
             {
-                string textureName = match.Value;
-                string sourceTex = System.IO.Path.Combine(sourceDir, textureName);
-                if (System.IO.File.Exists(sourceTex))
+                int glewRes = ProjectMNative.glewInit();
+                if (glewRes != 0)
                 {
-                    string destTex = System.IO.Path.Combine(tempDir, textureName);
-                    System.IO.File.Copy(sourceTex, destTex, true);
+                    Console.WriteLine($"[ProjectM] glewInit() failed with code: {glewRes}");
+                }
+                ProjectMNative.InstallGlewHooks();
+            }
+
+            if (ProjectMNative.projectm_create != null)
+            {
+                _projectMHandle = ProjectMNative.projectm_create();
+                if (_projectMHandle == IntPtr.Zero)
+                {
+                    Console.WriteLine("[ProjectM] ERROR: projectm_create() returned NULL handle");
+                }
+                else
+                {
+                    ProjectMNative.projectm_set_fps(_projectMHandle, 60);
+                    ProjectMNative.projectm_set_window_size(_projectMHandle, (nuint)Math.Max(1, Bounds.Width), (nuint)Math.Max(1, Bounds.Height));
+
+                    if (ProjectMNative.projectm_set_texture_search_paths != null)
+                    {
+                        var texturesPath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ProjectM", "textures");
+                        if (System.IO.Directory.Exists(texturesPath))
+                        {
+                            IntPtr ptr = Marshal.StringToHGlobalAnsi(texturesPath);
+                            ProjectMNative.projectm_set_texture_search_paths(_projectMHandle, new IntPtr[] { ptr }, 1);
+                            Marshal.FreeHGlobal(ptr);
+                        }
+                    }
                 }
             }
-
-            _presetQueue.Enqueue(destPath);
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[ProjectM] Failed to copy preset to temp folder: {ex.Message}");
-            // Fallback to original path if copy fails
-            _presetQueue.Enqueue(path);
-        }
-
-        while (_presetQueue.Count > 5)
-        {
-            _presetQueue.TryDequeue(out _);
+            Console.WriteLine($"ProjectM Init Error: {ex}");
         }
     }
-    
-    public bool IsHandleValid => _projectMHandle != IntPtr.Zero;
+    #endregion
 }
