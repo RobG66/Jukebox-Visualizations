@@ -194,7 +194,13 @@ public static class ProjectMNative
 
     public static BindFramebufferDelegate? OriginalBindFramebuffer;
     private static readonly BindFramebufferDelegate _hookedBindFramebufferDelegate = HookedBindFramebuffer;
-    public static int TargetFbo = 0;
+    [ThreadStatic]
+    private static int _targetFbo;
+    public static int TargetFbo
+    {
+        get => _targetFbo;
+        set => _targetFbo = value;
+    }
     private static bool _hooksInstalled = false;
 
     private static void HookedBindFramebuffer(uint target, uint framebuffer)
